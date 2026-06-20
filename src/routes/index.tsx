@@ -1,3 +1,4 @@
+import { useState, useEffect, useRef } from 'react'
 import { createFileRoute, Link } from '@tanstack/react-router'
 import { HeroCanvas } from '~/components/landing/HeroCanvas'
 import { ComplianceCards } from '~/components/landing/ComplianceCards'
@@ -8,7 +9,6 @@ export const Route = createFileRoute('/')({
   component: LandingPage,
 })
 
-// YC-style feature highlights — three pillars of the product.
 const FEATURES = [
   {
     kicker: 'Find',
@@ -27,58 +27,66 @@ const FEATURES = [
   },
 ]
 
-// Page 1 — Landing (the YC-grade hero).
-// 100% client-side, no backend dependency.
 function LandingPage() {
+  const demoRef = useRef<HTMLDivElement>(null)
+  const [isDemoVisible, setIsDemoVisible] = useState(false)
+  const [isAnimationFinished, setIsAnimationFinished] = useState(false)
+
+  useEffect(() => {
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting) {
+          setIsDemoVisible(true)
+          observer.disconnect() 
+        }
+      },
+      { rootMargin: '150px' }
+    )
+
+    if (demoRef.current) {
+      observer.observe(demoRef.current)
+    }
+
+    return () => observer.disconnect()
+  }, [])
+
   return (
     <main className="landing">
-      {/* Hero — the rotatable 3D apartment district sits behind the copy,
-          full-bleed, blended into the page with a scrim for legibility. */}
-     <section className="hero">
-      <div className="hero__visual">
-        <HeroCanvas />
-      </div>
-      
-      <div className="hero__scrim" aria-hidden />
-      
-      {/* 1. Let mouse events pass THROUGH the invisible full-screen wrapper */}
-      <div className="hero__inner pointer-events-none">
-        
-        {/* 2. Shrink container to content width, and re-enable mouse events for the text */}
-        <div className="hero__copy w-fit pointer-events-auto">
-          
-          <span className="hero__eyebrow">AI construction foreman</span>
-          
-          {/* 3. Optional: Ensure the title/paragraph don't stretch artificially */}
-          <h1 className="hero__title max-w-max">
-            Build faster where the&nbsp;rules are hardest.
-          </h1>
-          <p className="hero__sub max-w-max">
-            Construca turns California’s tangle of compliance regimes into
-            something autonomous agents collect, classify, and file — so the
-            only bottleneck left is how fast you can pour.
-          </p>
-          
-          <div className="hero__cta">
-            <Link to="/product" className="btn btn--primary">
-              Get started
-            </Link>
-            <Link to="/map" className="btn btn--ghost">
-              Find your land
-            </Link>
-          </div>
-          
-          <div className="hero__proof">
-            <span>Cal/OSHA</span>
-            <span>Title 24</span>
-            <span>CEQA</span>
-            <span>DSA</span>
-            <span>SWPPP</span>
-          </div>
-          
+      {/* Hero Section */}
+      <section className="hero">
+        <div className="hero__visual">
+          <HeroCanvas />
         </div>
-      </div>
-    </section>
+        <div className="hero__scrim" aria-hidden />
+        <div className="hero__inner pointer-events-none">
+          <div className="hero__copy w-fit pointer-events-auto">
+            <span className="hero__eyebrow">AI construction foreman</span>
+            <h1 className="hero__title max-w-max">
+              Build faster where the&nbsp;rules are hardest.
+            </h1>
+            <p className="hero__sub max-w-max">
+              Construca turns California’s tangle of compliance regimes into
+              something autonomous agents collect, classify, and file — so the
+              only bottleneck left is how fast you can pour.
+            </p>
+            <div className="hero__cta">
+              <Link to="/product" className="btn btn--primary">
+                Get started
+              </Link>
+              <Link to="/map" className="btn btn--ghost">
+                Find your land
+              </Link>
+            </div>
+            <div className="hero__proof">
+              <span>Cal/OSHA</span>
+              <span>Title 24</span>
+              <span>CEQA</span>
+              <span>DSA</span>
+              <span>SWPPP</span>
+            </div>
+          </div>
+        </div>
+      </section>
 
       {/* Feature pillars */}
       <section className="section section--compact">
@@ -125,7 +133,65 @@ function LandingPage() {
         <ComplianceCards />
       </section>
 
-      <InteractiveMiniDemo />
+      {/* 3D Demo Section */}
+      <section className="section relative border-t border-[var(--line)]">
+        <div ref={demoRef} className="w-full min-h-[480px] relative">
+          {isDemoVisible && (
+            <InteractiveMiniDemo 
+              onAnimationComplete={() => setIsAnimationFinished(true)} 
+            />
+          )}
+          
+          {isAnimationFinished && (
+            <div className="absolute bottom-6 right-6 z-20 transition-all duration-500 ease-out animate-in fade-in slide-in-from-bottom-4">
+              <Link to="/map" className="btn btn--primary shadow-xl hover:scale-105 transition-transform">
+                Find Developable Land &rarr;
+              </Link>
+            </div>
+          )}
+        </div>
+      </section>
+
+{/* New Final Action Section */}
+<section className="section border-t border-[var(--line)] bg-[var(--bg)]">
+  <div className="text-center max-w-xl mx-auto mb-10">
+    <h1 className="section__eyebrow">Get Started</h1>
+  </div>
+
+  <div className="grid grid-cols-1 md:grid-cols-2 gap-6 max-w-4xl mx-auto">
+    {/* Path A: Find Land */}
+    {/* Changed items-start to items-center */}
+    <div className="p-8 border border-[var(--line)] rounded-[var(--radius)] bg-[var(--surface)] flex flex-col justify-between items-center transition-all hover:shadow-md">
+      {/* Added text-center here */}
+      <div className="text-center">
+        <span className="text-[var(--accent)] font-bold uppercase tracking-wider text-xs block mb-2">Market Discovery</span>
+        <h3 className="text-xl font-bold mb-2 text-[var(--ink)]">Source New Canvas</h3>
+        <p className="text-[var(--ink-soft)] text-sm leading-relaxed mb-6">
+          Scan regional constraints, zoning data, and environmental pressures across counties to pinpoint high-velocity parcels.
+        </p>
+      </div>
+      <Link to="/map" className="btn btn--primary w-full text-center">
+        Find Developable Land
+      </Link>
+    </div>
+
+    {/* Path B: Create Project */}
+    {/* Changed items-start to items-center */}
+    <div className="p-8 border border-[var(--line)] rounded-[var(--radius)] bg-[var(--surface)] flex flex-col justify-between items-center transition-all hover:shadow-md">
+      {/* Added text-center here */}
+      <div className="text-center">
+        <span className="text-[var(--accent)] font-bold uppercase tracking-wider text-xs block mb-2">Compliance Engine</span>
+        <h3 className="text-xl font-bold mb-2 text-[var(--ink)]">Onboard Existing Site</h3>
+        <p className="text-[var(--ink-soft)] text-sm leading-relaxed mb-6">
+          Already have an active site? Spin up a new blueprint timeline to sync autonomous agent processing directly with your field crew.
+        </p>
+      </div>
+      <Link to="/product" className="btn btn--ghost w-full text-center hover:bg-[var(--bg)]">
+        Create a Project
+      </Link>
+    </div>
+  </div>
+</section>
     </main>
   )
 }

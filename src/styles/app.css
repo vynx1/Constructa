@@ -95,10 +95,9 @@ a {
 }
 .section__eyebrow {
   margin: 0 0 0.5rem;
-  font-size: 0.78rem;
+  font-size: 1.4rem;
   font-weight: 600;
   letter-spacing: 0.08em;
-  text-transform: uppercase;
   color: var(--accent);
 }
 .section__title {
