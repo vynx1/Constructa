@@ -1,0 +1,3 @@
+# Pre-scraped county JSON for the demo lives here (frozen via Browserbase,
+# offline). The /api/map/* routes read this cache; Browserbase is never
+# invoked live. See BUILD_PLAN §4 "Data sourcing".

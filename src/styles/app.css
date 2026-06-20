@@ -1,0 +1,579 @@
+/* Construca design system — restrained, flat, tight color set.
+   Motion and 3D draw the eye; the surface stays quiet (BUILD_PLAN §0/§3). */
+
+:root {
+  --bg: #f7f5f1;
+  --surface: #ffffff;
+  --ink: #1a1916;
+  --ink-soft: #5c5850;
+  --line: #e2ddd4;
+  --accent: #c8553d;
+  --accent-ink: #ffffff;
+  --radius: 10px;
+  --maxw: 1080px;
+  --font: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--font);
+  -webkit-font-smoothing: antialiased;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+/* --- Nav ----------------------------------------------------------------- */
+.nav {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.9rem 1.5rem;
+  background: color-mix(in srgb, var(--bg) 85%, transparent);
+  backdrop-filter: blur(8px);
+  border-bottom: 1px solid var(--line);
+}
+.nav__brand {
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+.nav__links {
+  display: flex;
+  gap: 1.25rem;
+}
+.nav__link {
+  color: var(--ink-soft);
+}
+
+/* --- Buttons ------------------------------------------------------------- */
+.btn {
+  display: inline-block;
+  padding: 0.6rem 1.1rem;
+  border-radius: var(--radius);
+  border: 1px solid transparent;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+.btn--primary {
+  background: var(--accent);
+  color: var(--accent-ink);
+}
+.btn--ghost {
+  background: transparent;
+  border-color: var(--line);
+  color: var(--ink);
+}
+.btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* --- Layout primitives --------------------------------------------------- */
+.section {
+  max-width: var(--maxw);
+  margin: 0 auto;
+  padding: 5rem 1.5rem;
+}
+.section__eyebrow {
+  margin: 0 0 0.5rem;
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+.section__title {
+  font-size: clamp(1.5rem, 3vw, 2.1rem);
+  line-height: 1.1;
+  letter-spacing: -0.025em;
+  margin: 0;
+  max-width: 22ch;
+}
+
+/* --- Landing: hero ------------------------------------------------------- */
+.hero {
+  position: relative;
+  min-height: calc(100vh - 57px);
+  display: flex;
+  align-items: center;
+  background: var(--bg);
+  overflow: hidden;
+}
+/* Full-bleed 3D district sits behind everything. */
+.hero__visual {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+}
+/* Scrim keeps the copy legible over the 3D scene without hiding it. */
+.hero__scrim {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  background:
+    linear-gradient(
+      90deg,
+      color-mix(in srgb, var(--bg) 88%, transparent) 0%,
+      color-mix(in srgb, var(--bg) 70%, transparent) 34%,
+      color-mix(in srgb, var(--bg) 18%, transparent) 62%,
+      transparent 100%
+    ),
+    linear-gradient(
+      0deg,
+      color-mix(in srgb, var(--bg) 55%, transparent),
+      transparent 40%
+    );
+}
+.hero__inner {
+  position: relative;
+  z-index: 2;
+  width: 100%;
+  max-width: var(--maxw);
+  margin: 0 auto;
+  padding: 2rem 1.5rem;
+}
+/* Copy sits on a solid panel so the buildings behind never bleed through the
+   text — keeps it crisp and readable. */
+.hero__copy {
+  max-width: 37rem;
+  pointer-events: auto;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  padding: 2.4rem 2.4rem 2.1rem;
+  box-shadow: 0 30px 70px -34px rgba(26, 25, 22, 0.55);
+}
+.hero__eyebrow {
+  display: inline-block;
+  margin-bottom: 1rem;
+  padding: 0.3rem 0.7rem;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--ink-soft);
+  background: var(--surface);
+}
+.hero__title {
+  font-size: clamp(2.2rem, 4.6vw, 3.5rem);
+  line-height: 1.03;
+  letter-spacing: -0.035em;
+  margin: 0 0 1.1rem;
+  text-wrap: balance;
+}
+.hero__sub {
+  font-size: 1.08rem;
+  line-height: 1.55;
+  color: var(--ink-soft);
+  margin: 0;
+}
+.hero__cta {
+  display: flex;
+  gap: 0.75rem;
+  margin-top: 1.75rem;
+}
+.hero__proof {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem 1.25rem;
+  margin-top: 2rem;
+  padding-top: 1.25rem;
+  border-top: 1px solid var(--line);
+  font-size: 0.8rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--ink-soft);
+  text-transform: uppercase;
+}
+
+.hero__canvas {
+  position: absolute;
+  inset: 0;
+  touch-action: none;
+}
+.hero__canvas--poster {
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(80% 80% at 70% 30%, #efece6, #e3ddd2);
+}
+
+/* Drag-to-rotate hint, shown on first load */
+.rotate-hint {
+  position: absolute;
+  left: 50%;
+  bottom: 8%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.45rem 0.9rem;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--ink) 78%, transparent);
+  color: #fff;
+  font-size: 0.82rem;
+  font-weight: 600;
+  pointer-events: none;
+  opacity: 1;
+  transition: opacity 0.5s ease, transform 0.5s ease;
+}
+.rotate-hint--hidden {
+  opacity: 0;
+  transform: translateX(-50%) translateY(8px);
+}
+.rotate-hint__arrow {
+  font-size: 1.25rem;
+  line-height: 1;
+  display: inline-block;
+}
+.rotate-hint__arrow--left {
+  animation: nudge-left 1.4s ease-in-out infinite;
+}
+.rotate-hint__arrow--right {
+  animation: nudge-right 1.4s ease-in-out infinite;
+}
+@keyframes nudge-left {
+  0%, 100% { transform: translateX(0); opacity: 0.6; }
+  50% { transform: translateX(-4px); opacity: 1; }
+}
+@keyframes nudge-right {
+  0%, 100% { transform: translateX(0); opacity: 0.6; }
+  50% { transform: translateX(4px); opacity: 1; }
+}
+
+/* --- Landing: feature pillars (YC-style) --------------------------------- */
+.features {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1.25rem;
+  margin-top: 2.5rem;
+}
+.feature {
+  padding: 1.5rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+.feature:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 12px 30px -18px rgba(26, 25, 22, 0.4);
+}
+.feature__kicker {
+  display: inline-block;
+  margin-bottom: 0.75rem;
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+.feature__title {
+  margin: 0 0 0.5rem;
+  font-size: 1.2rem;
+  letter-spacing: -0.01em;
+}
+.feature__body {
+  margin: 0;
+  color: var(--ink-soft);
+  font-size: 0.95rem;
+  line-height: 1.55;
+}
+
+/* --- Landing: national map teaser ---------------------------------------- */
+.section--map {
+  max-width: none;
+  padding: 5rem 1.5rem;
+  background: linear-gradient(180deg, var(--bg), #efece6);
+}
+.map-teaser {
+  max-width: var(--maxw);
+  margin: 0 auto;
+  display: grid;
+  grid-template-columns: 0.85fr 1.15fr;
+  align-items: center;
+  gap: 2.5rem;
+}
+.map-teaser__copy {
+  max-width: 30rem;
+}
+.map-teaser__body {
+  margin: 1rem 0 1.75rem;
+  color: var(--ink-soft);
+  line-height: 1.6;
+}
+.usmap {
+  position: relative;
+  z-index: 1;
+  height: min(58vh, 480px);
+  border-radius: 16px;
+  background:
+    radial-gradient(70% 60% at 50% 35%, #f3f0ea, #e6e1d6);
+  border: 1px solid var(--line);
+  /* Don't clip the pin tooltips when they extend past the map edges. The
+     background/border still round via border-radius; the canvas is transparent
+     so its square corners don't show. */
+  overflow: visible;
+}
+/* The R3F canvas wrapper must also not clip the tooltips. */
+.usmap > div {
+  overflow: visible !important;
+}
+.usmap--poster {
+  background: linear-gradient(160deg, #efece6, #e3ddd2);
+}
+.usmap__hint {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0.75rem;
+  text-align: center;
+  margin: 0;
+  font-size: 0.8rem;
+  color: var(--ink-soft);
+  pointer-events: none;
+}
+
+/* Compact card surfaced over a market pillar (drei Html). Kept small so it
+   doesn't crowd the map; pointer-events are off so moving the mouse over it
+   never drops the hover (no flicker). */
+.market-card {
+  position: relative;
+  z-index: 100;
+  width: 108px;
+  padding: 0.4rem 0.5rem;
+  border-radius: 8px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  box-shadow: 0 10px 24px -14px rgba(26, 25, 22, 0.55);
+  font-size: 0.62rem;
+  line-height: 1.3;
+  transform: translateY(-6px);
+  pointer-events: none;
+  user-select: none;
+}
+.market-card--pinned {
+  border-color: color-mix(in srgb, var(--accent) 60%, var(--line));
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--accent) 35%, transparent),
+    0 10px 26px -14px rgba(26, 25, 22, 0.55);
+}
+.market-card__name {
+  display: block;
+  margin-bottom: 0.3rem;
+  font-size: 0.76rem;
+  letter-spacing: -0.01em;
+}
+.market-card__row {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.5rem;
+  color: var(--ink-soft);
+  padding: 0.05rem 0;
+}
+.market-card__row b {
+  color: var(--ink);
+}
+
+/* --- Landing: compliance cards ------------------------------------------- */
+/* Centered flex wrap so every card is the same size and the final (shorter)
+   row centers instead of leaving a ragged gap — symmetric with 7 cards. */
+.cards {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 1rem;
+  margin-top: 2.5rem;
+}
+.card {
+  position: relative;
+  flex: 0 0 232px;
+  max-width: 100%;
+  min-height: 130px;
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 1.5rem 1.25rem 1.25rem;
+  transition: border-color 0.2s ease, transform 0.2s ease;
+}
+.card:hover {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--line));
+  transform: translateY(-2px);
+}
+/* Icon: hidden at rest, animates in on hover */
+.card__icon {
+  position: absolute;
+  top: 1.1rem;
+  right: 1.1rem;
+  width: 30px;
+  height: 30px;
+  color: var(--accent);
+  opacity: 0;
+  transform: scale(0.5) rotate(-12deg);
+  transition: opacity 0.25s ease, transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+.card__icon svg {
+  width: 100%;
+  height: 100%;
+}
+.card:hover .card__icon {
+  opacity: 1;
+  transform: scale(1) rotate(0deg);
+}
+.card:hover .card__icon svg {
+  animation: icon-pop 0.6s ease;
+}
+@keyframes icon-pop {
+  0% { transform: translateY(2px); }
+  40% { transform: translateY(-3px); }
+  100% { transform: translateY(0); }
+}
+.card__title {
+  margin: 0 0 0.4rem;
+  font-size: 1.05rem;
+  padding-right: 2rem;
+}
+.card__body {
+  margin: 0;
+  color: var(--ink-soft);
+  font-size: 0.92rem;
+  line-height: 1.5;
+}
+
+/* --- Landing: how it works ----------------------------------------------- */
+.steps {
+  margin-top: 2rem;
+  padding-left: 1.2rem;
+  line-height: 2;
+  color: var(--ink-soft);
+  font-size: 1.05rem;
+}
+
+/* --- Landing: responsive ------------------------------------------------- */
+@media (max-width: 860px) {
+  .map-teaser {
+    grid-template-columns: 1fr;
+  }
+  .features {
+    grid-template-columns: 1fr;
+  }
+  .usmap {
+    height: 50vh;
+  }
+  /* Strengthen the scrim on small screens where copy overlaps more building. */
+  .hero__scrim {
+    background: linear-gradient(
+      0deg,
+      color-mix(in srgb, var(--bg) 80%, transparent) 0%,
+      color-mix(in srgb, var(--bg) 55%, transparent) 45%,
+      color-mix(in srgb, var(--bg) 30%, transparent) 100%
+    );
+  }
+}
+
+/* --- Map page ------------------------------------------------------------ */
+.map-page {
+  display: grid;
+  grid-template-columns: 1fr 320px;
+  height: calc(100vh - 57px);
+}
+.map-page__canvas {
+  position: relative;
+}
+.map-canvas {
+  position: absolute;
+  inset: 0;
+}
+.map-page__panel {
+  padding: 1.5rem;
+  border-left: 1px solid var(--line);
+  background: var(--surface);
+  overflow-y: auto;
+}
+.layer-switcher,
+.dc-toggle {
+  display: block;
+  margin: 1rem 0;
+  border: none;
+  padding: 0;
+}
+.layer-switcher__option {
+  display: block;
+  padding: 0.3rem 0;
+  color: var(--ink-soft);
+}
+
+/* --- Product page -------------------------------------------------------- */
+.product-page {
+  max-width: var(--maxw);
+  margin: 0 auto;
+  padding: 2.5rem 1.5rem;
+  display: grid;
+  gap: 2.5rem;
+}
+.intake__field {
+  display: block;
+  margin-bottom: 1rem;
+}
+.intake__field textarea,
+.panel--rfi input {
+  width: 100%;
+  margin-top: 0.4rem;
+  padding: 0.6rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  font: inherit;
+}
+.sequence {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+.sequence__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1rem 1.25rem;
+  border-bottom: 1px solid var(--line);
+  font-weight: 600;
+}
+.sequence__controls {
+  display: flex;
+  gap: 0.5rem;
+}
+.sequence__body {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1.25rem;
+  padding: 1.25rem;
+}
+.panel {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 1rem;
+}
+.panel__placeholder {
+  color: var(--ink-soft);
+  font-size: 0.9rem;
+}
+.sequence__agents {
+  display: grid;
+  gap: 1rem;
+}

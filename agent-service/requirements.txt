@@ -1,0 +1,7 @@
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+redis==5.2.1
+httpx==0.28.1
+# Voice (Deepgram) and the Fetch.ai watchdog uAgent — uncomment when wiring:
+# deepgram-sdk==3.8.0
+# uagents==0.22.0

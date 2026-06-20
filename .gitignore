@@ -1,0 +1,41 @@
+# Dependencies
+node_modules/
+.pnp
+.pnp.js
+
+# Build output
+.output/
+.nitro/
+.vinxi/
+dist/
+build/
+
+# TanStack Router generated route tree
+src/routeTree.gen.ts
+
+# Env
+.env
+.env.local
+.env.*.local
+
+# Logs
+*.log
+npm-debug.log*
+
+# Editor / OS
+.DS_Store
+.vscode/*
+!.vscode/extensions.json
+.idea/
+
+# Python agent-service
+agent-service/.venv/
+agent-service/__pycache__/
+agent-service/**/__pycache__/
+*.pyc
+
+# Test / coverage
+coverage/
+
+BUILD_PLAN.md
+README.md

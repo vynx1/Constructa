@@ -1,0 +1,50 @@
+# Full local stack: Redis + web app + Python agent service.
+# Usage:  docker compose up --build
+# The web app is at http://localhost:3000, the agent service at :8000.
+
+services:
+  redis:
+    image: redis:7-alpine
+    ports:
+      - '6379:6379'
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  web:
+    build: .
+    ports:
+      - '3000:3000'
+    environment:
+      NODE_ENV: production
+      PORT: '3000'
+      REDIS_URL: redis://redis:6379
+      AGENT_SERVICE_URL: http://agent:8000
+      # Provide these via a .env file or your secrets manager:
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      CLERK_SECRET_KEY: ${CLERK_SECRET_KEY:-}
+      VITE_CLERK_PUBLISHABLE_KEY: ${VITE_CLERK_PUBLISHABLE_KEY:-}
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  agent:
+    build: ./agent-service
+    ports:
+      - '8000:8000'
+    environment:
+      PORT: '8000'
+      REDIS_URL: redis://redis:6379
+      WEB_ORIGIN: http://localhost:3000
+      DEEPGRAM_API_KEY: ${DEEPGRAM_API_KEY:-}
+      FETCHAI_AGENT_SEED: ${FETCHAI_AGENT_SEED:-}
+    depends_on:
+      redis:
+        condition: service_healthy
+
+volumes:
+  redis-data:
