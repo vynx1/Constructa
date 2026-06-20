@@ -1,6 +1,7 @@
 import { createFileRoute, Link } from '@tanstack/react-router'
 import { HeroCanvas } from '~/components/landing/HeroCanvas'
 import { ComplianceCards } from '~/components/landing/ComplianceCards'
+import { InteractiveMiniDemo } from '~/components/landing/InteractiveMiniDemo'
 import { USMapTeaser } from '~/components/landing/USMapTeaser'
 
 export const Route = createFileRoute('/')({
@@ -80,7 +81,7 @@ function LandingPage() {
     </section>
 
       {/* Feature pillars */}
-      <section className="section">
+      <section className="section section--compact">
         <p className="section__eyebrow">Why Construca</p>
         <h2 className="section__title">
           The land-to-launch loop, compressed.
@@ -118,22 +119,13 @@ function LandingPage() {
       </section>
 
       {/* Compliance breakdown */}
-      <section className="section">
+      <section className="section section--compact mx-auto max-w-7xl px-6">
         <p className="section__eyebrow">Coverage</p>
-        <h2 className="section__title">What we keep compliant</h2>
+        <h2 className="section__title max-w-none">What we keep compliant</h2>
         <ComplianceCards />
       </section>
 
-      {/* How it works */}
-      <section className="section">
-        <p className="section__eyebrow">How it works</p>
-        <h2 className="section__title">Three moves to a permitted build.</h2>
-        <ol className="steps">
-          <li>Find land on the national intelligence map.</li>
-          <li>Stake a parcel for an instant feasibility pre-check.</li>
-          <li>Run the live 10-step build with three AI agents.</li>
-        </ol>
-      </section>
+      <InteractiveMiniDemo />
     </main>
   )
 }

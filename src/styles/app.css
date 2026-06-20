@@ -1,3 +1,5 @@
+@import 'tailwindcss';
+
 /* Construca design system — restrained, flat, tight color set.
    Motion and 3D draw the eye; the surface stays quiet (BUILD_PLAN §0/§3). */
 
@@ -87,6 +89,9 @@ a {
   max-width: var(--maxw);
   margin: 0 auto;
   padding: 5rem 1.5rem;
+}
+.section--compact {
+  padding: 2.75rem 1.5rem 2rem;
 }
 .section__eyebrow {
   margin: 0 0 0.5rem;
@@ -298,7 +303,7 @@ a {
 /* --- Landing: national map teaser ---------------------------------------- */
 .section--map {
   max-width: none;
-  padding: 5rem 1.5rem;
+  padding: 3.5rem 1.5rem;
   background: linear-gradient(180deg, var(--bg), #efece6);
 }
 .map-teaser {
@@ -485,6 +490,64 @@ a {
       color-mix(in srgb, var(--bg) 55%, transparent) 45%,
       color-mix(in srgb, var(--bg) 30%, transparent) 100%
     );
+  }
+}
+
+/* --- Interactive mini demo ------------------------------------------------ */
+.demo-cursor {
+  position: absolute;
+  z-index: 20;
+  pointer-events: none;
+  filter: drop-shadow(0 1px 2px rgba(15, 23, 42, 0.25));
+}
+.demo-cursor--moving {
+  animation: demo-cursor-path 3s cubic-bezier(0.45, 0.05, 0.25, 1) forwards;
+}
+.demo-cursor--landed {
+  left: 41%;
+  top: 48%;
+  transform: translate(-2px, -2px);
+}
+@keyframes demo-cursor-path {
+  0% {
+    left: 78%;
+    top: 72%;
+  }
+  70% {
+    left: 44%;
+    top: 50%;
+  }
+  100% {
+    left: 41%;
+    top: 48%;
+  }
+}
+.demo-parcel-glow {
+  filter: drop-shadow(0 0 8px rgba(245, 158, 11, 0.45));
+}
+.demo-type-cursor {
+  animation: demo-blink 0.85s step-end infinite;
+}
+@keyframes demo-blink {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0;
+  }
+}
+.demo-input-pulse {
+  animation: demo-submit-pulse 0.55s ease-in-out;
+}
+@keyframes demo-submit-pulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(200, 85, 61, 0.35);
+    border-color: #c8553d;
+  }
+  100% {
+    box-shadow: 0 0 0 12px rgba(200, 85, 61, 0);
+    border-color: rgb(226 232 240 / 0.8);
   }
 }
 
