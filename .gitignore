@@ -39,3 +39,9 @@ coverage/
 
 BUILD_PLAN.md
 README.md
+*.avkey
+agent-service/agents/.avkey
+agent-service/agents/*log.txt
+devlog.txt
+agentlog.txt
+driverlog.txt

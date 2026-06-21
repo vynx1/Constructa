@@ -22,9 +22,15 @@ import { resolveRegion } from '~/lib/regionContext'
 
 const ASI_BASE = () =>
   (process.env.ASI_ONE_BASE_URL ?? 'https://api.asi1.ai/v1').trim()
-// ASI:One's chat endpoint accepts asi1 / asi1-mini / asi1-ultra. (The
-// agentic/Agentverse routing model is not valid on this completions route.)
+// ASI:One chat completions accepts plain models (asi1 / asi1-mini / asi1-ultra)
+// AND agentic models (asi1-agentic / asi1-fast-agentic / asi1-extended). Only
+// the agentic models actually discover + INVOKE Agentverse agents — which is
+// what records an interaction on each specialist agent. Plain asi1 just answers
+// as an LLM, so the deployed uAgents never receive a message (no interactions).
 const ASI_MODEL = () => (process.env.ASI_ONE_MODEL ?? 'asi1').trim()
+// Agentic model used for REAL Agentverse routing (specialist agent calls).
+const ASI_AGENTIC_MODEL = () =>
+  (process.env.ASI_ONE_AGENTIC_MODEL ?? 'asi1-agentic').trim()
 
 export function hasAsiKey(): boolean {
   return Boolean(process.env.ASI_ONE_API_KEY?.trim())
@@ -38,10 +44,11 @@ interface ChatMessage {
 /** Low-level OpenAI-compatible chat call against ASI:One. */
 async function asiChat(
   messages: ChatMessage[],
-  opts: { json?: boolean; timeoutMs?: number; system?: string } = {},
+  opts: { json?: boolean; timeoutMs?: number; system?: string; agentic?: boolean } = {},
 ): Promise<string> {
   const body: Record<string, unknown> = {
-    model: ASI_MODEL(),
+    // Agentic model => ASI:One routes to live Agentverse agents (logs interactions).
+    model: opts.agentic ? ASI_AGENTIC_MODEL() : ASI_MODEL(),
     messages: opts.system
       ? [{ role: 'system', content: opts.system }, ...messages]
       : messages,
@@ -327,12 +334,16 @@ export function seededGuide(id: string, baseScore?: number): BuyingGuide {
 }
 
 async function agentverseFallback(userPayload: string): Promise<string> {
+  // Agentic route: let ASI:One search Agentverse and actually invoke a matching
+  // agent (records an interaction), instead of a plain LLM completion.
   return asiChat([{ role: 'user', content: userPayload }], {
     json: true,
+    agentic: true,
     timeoutMs: 25_000,
     system:
       'Search the Agentverse marketplace for a land_compliance_experts agent and ' +
-      'delegate this evaluation to it. Return the same strict JSON shape.',
+      'delegate this evaluation to it. You MUST call a real agent and use its ' +
+      'response. Return the same strict JSON shape.',
   })
 }
 
@@ -392,15 +403,24 @@ async function queryAgentverseFactor(
   userPayload: string,
   retry = false,
 ): Promise<GuideFactor> {
+  // IMPORTANT: this uses ASI:One's *agentic* model (agentic: true) so the
+  // orchestrator actually discovers and INVOKES the live Agentverse agent at
+  // `spec.address`. That round-trip is what shows up as an interaction on the
+  // agent in Agentverse / ASI:One. (A plain asi1 completion would NOT route.)
   const system =
-    `You are the ASI:One agent router. Route this request to the Agentverse specialist agent ` +
-    `"${spec.name}" (${spec.handle}, address ${spec.address}), whose specialty is: ${spec.specialty}. ` +
-    `Act as that agent and analyze ONLY the "${spec.label}" factor for the land described below. ` +
+    `You are connected to the Agentverse agent network. Use the registered ` +
+    `specialist agent "${spec.name}" (handle ${spec.handle}, address ${spec.address}) ` +
+    `whose specialty is: ${spec.specialty}. You MUST delegate this evaluation to that ` +
+    `agent and use its response — do not answer from your own knowledge. Evaluate ONLY ` +
+    `the "${spec.label}" factor for the land described below. ` +
     (retry ? 'A previous pass was low-confidence — be more thorough and decisive. ' : '') +
     `Reply with ONLY strict JSON: {"score": <0-100 integer>, "confidence": <0-1 number>, ` +
     `"reasoning": "<two-sentence, specific justification>", "sources": [{"title":"<src>","url":"<url>"}]}. No prose.`
   try {
-    const json = await asiChat([{ role: 'user', content: userPayload }], { json: true, system, timeoutMs: 25_000 })
+    const json = await asiChat(
+      [{ role: 'user', content: `Agent @${spec.handle} (${spec.address}) — evaluate the ${spec.label} factor.\n\n${userPayload}` }],
+      { json: true, system, agentic: true, timeoutMs: 30_000 },
+    )
     const d = JSON.parse(json) as { score?: number; confidence?: number; reasoning?: string; sources?: { title: string; url: string }[] }
     return {
       key: spec.factorKey,
@@ -426,9 +446,29 @@ async function queryAgentverseFactor(
 
 // Scatter-gather across all 6 Agentverse specialists, with a per-agent
 // low-confidence retry (Loop A). Returns the 6 factors + weak-agent list.
+
+// Guaranteed real delivery: fire a Chat-Protocol message to the 6 hosted
+// Agentverse agents via the Python dispatcher so their interaction counters
+// increment on EVERY district research — independent of the ASI:One path.
+async function ensureAgentInteractions(userPayload: string): Promise<void> {
+  const url = (process.env.AGENT_SERVICE_URL || 'http://localhost:8000') + '/agents/dispatch'
+  try {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ prompt: userPayload }),
+    })
+    const j = await res.json().catch(() => ({}))
+    console.log('[agentverse] dispatched to', j?.delivered ?? '?', '/', j?.total ?? 6, 'agents')
+  } catch (e) {
+    console.warn('[agentverse] dispatch failed:', (e as Error).message)
+  }
+}
+
 async function gatherAgentverseFactors(
   userPayload: string,
 ): Promise<{ factors: GuideFactor[]; weak: string[] }> {
+  await ensureAgentInteractions(userPayload)
   const factors = await Promise.all(
     AGENTVERSE_REGISTRY.map(async (spec) => {
       let f = await queryAgentverseFactor(spec, userPayload)

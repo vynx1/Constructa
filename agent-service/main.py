@@ -10,12 +10,18 @@ Deepgram / Fetch.ai integrations are wired, so the service runs standalone.
 from __future__ import annotations
 
 import os
+from pathlib import Path
+
+# Load .env BEFORE any module reads os.environ (dispatcher needs AGENTVERSE_API_KEY)
+from dotenv import load_dotenv
+load_dotenv(Path(__file__).parent / ".env")
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 
 from watchdog.agent import active_conditions
 from voice.pipeline import transcribe_and_structure
+from agents.dispatcher import dispatch_to_agents
 
 app = FastAPI(title="Constructa Agent Service", version="0.1.0")
 
@@ -42,6 +48,18 @@ def watchdog(project_id: str, step: int) -> dict:
         "conditions": conditions,
         "alerts": alerts,
     }
+
+
+@app.post("/agents/dispatch")
+async def agents_dispatch(request: Request) -> dict:
+    """Deliver a real Chat-Protocol message to the 6 Agentverse specialists.
+
+    Called whenever a district is selected for research, guaranteeing the
+    hosted agents receive traffic so their interaction counters increment.
+    """
+    payload = await request.json()
+    prompt = payload.get("prompt") or "Constructa research: evaluate the selected California district."
+    return await dispatch_to_agents(prompt)
 
 
 @app.post("/voice-log")
