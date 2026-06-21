@@ -446,11 +446,36 @@ export async function scrapeLocalPartners(regionId: string): Promise<PartnerScra
 
 // --- Deterministic mock fallback ---------------------------------------------
 const MOCK_NAMES: Record<string, string[]> = {
-  'general contractor': ['Summit Build Co.', 'Cornerstone Builders', 'Ironwood Construction'],
-  excavation: ['Bedrock Excavation', 'Terra Grading Co.', 'DeepCut Earthworks'],
-  'construction company': ['Apex Construction', 'Granite Works', 'BuildRight Co.'],
-  surveying: ['Meridian Survey Group', 'TruLine Surveyors', 'Benchmark Geomatics'],
-  'home builder': ['NorthLight Homes', 'Vellum Custom Homes', 'Forma Residential'],
+  'general contractor': [
+    'Summit Build Co.', 'Cornerstone Builders', 'Ironwood Construction',
+    'Redline General Contracting', 'Keystone Build Group', 'Anvil & Oak Builders',
+    'Patriot General Contractors', 'Blue Ridge Construction', 'Sterling Build Co.',
+    'Foundry Contracting', 'Northgate Builders', 'Halcyon Construction',
+  ],
+  excavation: [
+    'Bedrock Excavation', 'Terra Grading Co.', 'DeepCut Earthworks',
+    'Ridgeline Excavating', 'Mammoth Site Works', 'Trench Pro Excavation',
+    'Granite Earthmovers', 'Vanguard Excavation', 'Copperline Grading',
+    'Frontier Site Prep', 'Drawn Stone Excavating', 'Basalt Earthworks',
+  ],
+  'construction company': [
+    'Apex Construction', 'Granite Works', 'BuildRight Co.',
+    'Meridian Construction', 'Cobalt Builders', 'Lighthouse Construction',
+    'Evergreen Construction Co.', 'Titan Build Works', 'Harborview Construction',
+    'Sequoia Construction', 'Brightline Builders', 'Atlas Construction Group',
+  ],
+  surveying: [
+    'Meridian Survey Group', 'TruLine Surveyors', 'Benchmark Geomatics',
+    'Cardinal Land Surveying', 'Precision Point Surveyors', 'Datum Survey Co.',
+    'Compass Rose Surveying', 'Vertex Geomatics', 'Plumb Line Surveyors',
+    'Northstar Land Survey', 'Axis Surveying', 'Bearing & Bound Surveyors',
+  ],
+  'home builder': [
+    'NorthLight Homes', 'Vellum Custom Homes', 'Forma Residential',
+    'Cedar & Sage Homes', 'Hearthstone Builders', 'Lantern Custom Homes',
+    'Maplewood Residential', 'Crestline Homes', 'Auburn Lane Builders',
+    'Willowbrook Homes', 'Stonegate Custom Homes', 'Birchwood Residential',
+  ],
 }
 const MOCK_REVIEWS = [
   'Showed up on time, fair pricing, and the crew was professional from start to finish.',

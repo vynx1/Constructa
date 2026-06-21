@@ -47,6 +47,13 @@ api.get('/health', (c) => c.json({ ok: true, service: 'Constructa-web-api' }))
 // Implements the interactive-map data plane (master plan Â§1 phases 1â€“2 + Â§3A).
 // All reads serve from Redis when present, else from the seeded mock cache, so
 // the map renders identically with or without infrastructure.
+// In-memory fallback for the local-partners rotation window when Redis is
+// unavailable. Holds the last 5 distinct districts' shown partner keys so the
+// same business is not shown again until the user clicks through 5 more
+// different districts.
+type PartnerWindowEntry = { regionId: string; keys: string[] }
+let partnersWindowMem: PartnerWindowEntry[] = []
+
 const map = new Hono()
 
 // Phase 1 â€” Regional Heatmap. National state-level aggregate scores.
@@ -358,53 +365,116 @@ map.get('/region/:regionId/partners', async (c) => {
   const regionId = c.req.param('regionId')
   const cursor = Math.max(0, parseInt(c.req.query('cursor') ?? '0', 10) || 0)
   const pageSize = 8
+  const DISTRICT_BATCH = 8 // partners "claimed" per district
+  const WINDOW_SIZE = 5 // rotate: no repeat until 5 different districts later
   const liveMode = c.req.header('x-live-mode') === 'true'
-  // Allow callers to force a fresh scrape, bypassing any cached result.
   const refresh =
     c.req.query('refresh') === 'true' || c.req.header('x-refresh') === 'true'
   const redis = getRedis()
 
-  const paginate = (all: BusinessPartner[], live: boolean) => {
-    const slice = all.slice(cursor, cursor + pageSize)
-    const nextCursor = cursor + pageSize < all.length ? cursor + pageSize : null
-    return c.json({ partners: slice, nextCursor, total: all.length, live })
+  // Stable identity for a partner across districts: normalized name + host.
+  const normKey = (p: BusinessPartner) =>
+    `${(p.name || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()}|${(
+      p.sourceSite || ''
+    ).toLowerCase()}`
+
+  // --- Rotation window state (Redis-backed, in-memory fallback) -------------
+  const readWindow = async (): Promise<PartnerWindowEntry[]> => {
+    if (redis) {
+      try {
+        const raw = await redis.get(keys.partnersWindow())
+        if (raw) return JSON.parse(raw) as PartnerWindowEntry[]
+      } catch (err) {
+        console.warn('[partners] window read failed:', err)
+      }
+    }
+    return partnersWindowMem
+  }
+  const writeWindow = async (w: PartnerWindowEntry[]): Promise<void> => {
+    partnersWindowMem = w
+    if (redis) {
+      try {
+        await redis.set(keys.partnersWindow(), JSON.stringify(w), 'EX', 86400)
+      } catch (err) {
+        console.warn('[partners] window write failed:', err)
+      }
+    }
   }
 
   const cacheKey = keys.regionPartners(regionId)
 
-  // Serve cache only when not explicitly refreshing.
+  // --- 1. Resolve the full source list for this district -------------------
+  let all: BusinessPartner[] | null = null
+  let live = false
+
   if (!refresh && redis) {
     try {
       const cached = await redis.get(cacheKey)
       if (cached) {
-        const partners = JSON.parse(cached) as BusinessPartner[]
-        if (Array.isArray(partners) && partners.length) return paginate(partners, true)
+        const parsed = JSON.parse(cached) as BusinessPartner[]
+        if (Array.isArray(parsed) && parsed.length) {
+          all = parsed
+          live = true
+        }
       }
     } catch (err) {
       console.warn('[partners] cache read failed:', err)
     }
   }
 
-  const mock = mockPartners(regionId)
-  if (!liveMode) return paginate(mock, false)
-
-  try {
-    const { partners, live } = await scrapeLocalPartners(regionId)
-    // CRITICAL: only cache real live data — never cache the mock fallback,
-    // otherwise stale fake contractors get served forever.
-    if (live && partners.length) {
+  if (!all) {
+    if (!liveMode) {
+      all = mockPartners(regionId)
+      live = false
+    } else {
       try {
-        if (redis) await redis.set(cacheKey, JSON.stringify(partners), 'EX', 7200)
+        const res = await scrapeLocalPartners(regionId)
+        if (res.live && res.partners.length) {
+          all = res.partners
+          live = true
+          try {
+            if (redis) await redis.set(cacheKey, JSON.stringify(all), 'EX', 7200)
+          } catch (err) {
+            console.warn('[partners] cache write failed:', err)
+          }
+        } else {
+          all = res.partners.length ? res.partners : mockPartners(regionId)
+          live = false
+        }
       } catch (err) {
-        console.warn('[partners] cache write failed:', err)
+        console.error('[partners] live failed, serving mock:', err)
+        all = mockPartners(regionId)
+        live = false
       }
-      return paginate(partners, true)
     }
-    return paginate(partners.length ? partners : mock, false)
-  } catch (err) {
-    console.error('[partners] live failed, serving mock:', err)
-    return paginate(mock, false)
   }
+
+  // --- 2. Apply the 5-district rotation window -----------------------------
+  const windowState = await readWindow()
+  const blocked = new Set<string>()
+  for (const entry of windowState) {
+    if (entry.regionId !== regionId) for (const k of entry.keys) blocked.add(k)
+  }
+  let rotated = all.filter((p) => !blocked.has(normKey(p)))
+  // Never return an empty list — if everything is blocked, fall back to the
+  // full set (the pool is smaller than 5 districts' worth of partners).
+  if (rotated.length === 0) rotated = all
+
+  const districtBatch = rotated.slice(0, DISTRICT_BATCH)
+
+  // --- 3. Record this district into the rotation window (first page only) ---
+  if (cursor === 0) {
+    const nextWindow: PartnerWindowEntry[] = [
+      { regionId, keys: districtBatch.map(normKey) },
+      ...windowState.filter((e) => e.regionId !== regionId),
+    ].slice(0, WINDOW_SIZE)
+    await writeWindow(nextWindow)
+  }
+
+  // --- 4. Paginate within this district's batch ----------------------------
+  const slice = districtBatch.slice(cursor, cursor + pageSize)
+  const nextCursor = cursor + pageSize < districtBatch.length ? cursor + pageSize : null
+  return c.json({ partners: slice, nextCursor, total: districtBatch.length, live })
 })
 
 api.route('/map', map)

@@ -56,4 +56,8 @@ export const keys = {
   likedPlots: () => `liked:plots`,
   // map:region:{id}:partners -> JSON: BrowserBase local contractor/business list
   regionPartners: (id: string) => `map:region:${id}:partners`,
+  // map:partners:window -> JSON: sliding window of last 5 districts' shown
+  // partner keys, used to rotate partners so the same business is not shown
+  // again until the user has clicked through 5 different districts.
+  partnersWindow: () => `map:partners:window`,
 } as const
