@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { DeckGL } from '@deck.gl/react'
-import { GeoJsonLayer, PolygonLayer } from '@deck.gl/layers'
+import { GeoJsonLayer } from '@deck.gl/layers'
 import {
   FlyToInterpolator,
   WebMercatorViewport,
@@ -8,24 +8,13 @@ import {
 } from '@deck.gl/core'
 import {
   mapClient,
-  scoreColor,
-  scoreColorCss,
+  colorForScore,
   type CongressRegion,
-  type HeatCell,
   type StateScore,
 } from '~/lib/mapClient'
-import { pointInGeometry, geometryBBox, clipGeometryToStrip } from '~/lib/geo'
+import { geometryBBox } from '~/lib/geo'
 import { FloatingActionDrawer } from './FloatingActionDrawer'
-
-// ---------------------------------------------------------------------------
-// MapViewport — master plan §2A, revised per ask #3.
-//
-// NATIONAL: US states shaded by construction-consensus score.
-// Clicking a state does NOT zoom to a hyper-specific point — it fits the whole
-// state in view, draws its CONGRESSIONAL REGION dividing lines, paints a dense
-// zip-level heatmap clipped to the state's real outline, and lets the user
-// SELECT a region. Selecting a region surfaces the "Explore This Area" CTA.
-// ---------------------------------------------------------------------------
+import { ColorScaleLegend } from './ColorScaleLegend'
 
 type ZoomLevel = 'NATIONAL' | 'STATE'
 
@@ -39,17 +28,6 @@ const NATIONAL_VIEW: MapViewState = {
 
 const US_STATES_GEOJSON =
   'https://raw.githubusercontent.com/PublicaMundi/MappingAPI/master/data/geojson/us-states.json'
-
-// Smallest positive gap between sorted unique values → the grid step.
-function gridStep(values: number[]): number {
-  const uniq = [...new Set(values)].sort((a, b) => a - b)
-  let min = Infinity
-  for (let i = 1; i < uniq.length; i++) {
-    const d = uniq[i]! - uniq[i - 1]!
-    if (d > 1e-9 && d < min) min = d
-  }
-  return Number.isFinite(min) ? min : 0.1
-}
 
 interface Props {
   onExplore: (region: CongressRegion) => void
@@ -65,10 +43,12 @@ export function MapViewport({ onExplore, activeRegion }: Props) {
   const [scores, setScores] = useState<Record<string, StateScore>>({})
   const [selectedState, setSelectedState] = useState<string | null>(null)
   const [selectedFeature, setSelectedFeature] = useState<any>(null)
-  const [regions, setRegions] = useState<CongressRegion[]>([])
-  const [cells, setCells] = useState<HeatCell[]>([])
-  const [selectedRegion, setSelectedRegion] = useState<CongressRegion | null>(null)
+  const [districtGeo, setDistrictGeo] = useState<any>(null)
+  const [countyGeo, setCountyGeo] = useState<any>(null)
+  const [districts, setDistricts] = useState<CongressRegion[]>([])
+  const [selectedDistrict, setSelectedDistrict] = useState<CongressRegion | null>(null)
   const [hovered, setHovered] = useState<string | null>(null)
+  const [loadingState, setLoadingState] = useState(false)
   const stateNameToCode = useRef<Record<string, string>>({})
 
   useEffect(() => setMounted(true), [])
@@ -101,6 +81,24 @@ export function MapViewport({ onExplore, activeRegion }: Props) {
     }
   }, [mounted])
 
+  const nationalScores = useMemo(
+    () => Object.values(scores).map((s) => s.aggregateScore),
+    [scores],
+  )
+
+  const districtScores = useMemo(
+    () => districts.map((d) => d.score),
+    [districts],
+  )
+
+  const scorePopulation =
+    zoomLevel === 'NATIONAL' ? nationalScores : districtScores
+
+  const scoreExtentView = useMemo(() => {
+    const vals = scorePopulation.length ? scorePopulation : [0, 100]
+    return { min: Math.min(...vals), max: Math.max(...vals) }
+  }, [scorePopulation])
+
   const scoreForFeature = (feature: any): number | null => {
     const name: string = feature?.properties?.name ?? ''
     const code = stateNameToCode.current[name.toLowerCase()]
@@ -108,7 +106,6 @@ export function MapViewport({ onExplore, activeRegion }: Props) {
     return scores[code]?.aggregateScore ?? null
   }
 
-  // Compute a viewState that fits a geometry's bounds in the current container.
   const fitToGeometry = (geometry: any): MapViewState => {
     const [minLng, minLat, maxLng, maxLat] = geometryBBox(geometry)
     const w = containerRef.current?.clientWidth ?? 900
@@ -138,29 +135,31 @@ export function MapViewport({ onExplore, activeRegion }: Props) {
     }
   }
 
-  // Drill into a clicked state — fit bounds + load regions + heatmap.
   const enterState = async (feature: any) => {
     const name: string = feature?.properties?.name ?? ''
     const code = stateNameToCode.current[name.toLowerCase()]
     if (!code) return
     setSelectedState(code)
     setSelectedFeature(feature)
-    setSelectedRegion(null)
+    setSelectedDistrict(null)
     setZoomLevel('STATE')
     setViewState(fitToGeometry(feature.geometry))
+    setLoadingState(true)
     try {
-      const [regionRes, heatRes] = await Promise.all([
-        mapClient.regions(code),
-        mapClient.heatmap(code),
+      const [cdRes, countyRes] = await Promise.all([
+        mapClient.congressionalDistricts(code),
+        mapClient.counties(code),
       ])
-      setRegions(regionRes.regions)
-      // Clip dense cells to the state's real outline so the heatmap hugs it.
-      const clipped = heatRes.cells.filter((cell) =>
-        pointInGeometry(cell.coordinates, feature.geometry),
-      )
-      setCells(clipped)
+      setDistricts(cdRes.districts)
+      setDistrictGeo(cdRes.geojson)
+      setCountyGeo(countyRes.geojson)
     } catch (err) {
       console.error('[map] state drill failed', err)
+      setDistricts([])
+      setDistrictGeo(null)
+      setCountyGeo(null)
+    } finally {
+      setLoadingState(false)
     }
   }
 
@@ -168,9 +167,10 @@ export function MapViewport({ onExplore, activeRegion }: Props) {
     setZoomLevel('NATIONAL')
     setSelectedState(null)
     setSelectedFeature(null)
-    setSelectedRegion(null)
-    setRegions([])
-    setCells([])
+    setSelectedDistrict(null)
+    setDistricts([])
+    setDistrictGeo(null)
+    setCountyGeo(null)
     setViewState({
       ...NATIONAL_VIEW,
       transitionDuration: 900,
@@ -178,25 +178,9 @@ export function MapViewport({ onExplore, activeRegion }: Props) {
     } as MapViewState)
   }
 
-  // Build congressional-region polygons by clipping the state to each strip.
-  const regionFC = useMemo(() => {
-    if (!selectedFeature || !regions.length) return null
-    const features = regions
-      .map((r) => {
-        const geometry = clipGeometryToStrip(selectedFeature.geometry, r.xMin, r.xMax)
-        if (!geometry.coordinates.length) return null
-        return {
-          type: 'Feature',
-          properties: { id: r.id, label: r.label, score: r.score, index: r.index },
-          geometry,
-        }
-      })
-      .filter(Boolean)
-    return { type: 'FeatureCollection', features }
-  }, [selectedFeature, regions])
-
   const layers = useMemo(() => {
     const out: any[] = []
+
     if (statesGeo) {
       out.push(
         new GeoJsonLayer({
@@ -206,9 +190,11 @@ export function MapViewport({ onExplore, activeRegion }: Props) {
           filled: true,
           pickable: zoomLevel === 'NATIONAL',
           autoHighlight: zoomLevel === 'NATIONAL',
-          highlightColor: [200, 85, 61, 90],
+          highlightColor: [200, 133, 61, 120],
           getLineColor:
-            zoomLevel === 'NATIONAL' ? [226, 221, 212, 255] : [210, 205, 196, 120],
+            zoomLevel === 'NATIONAL'
+              ? [34, 211, 238, 60]
+              : [255, 255, 255, 40],
           lineWidthMinPixels: zoomLevel === 'NATIONAL' ? 1 : 0.5,
           getFillColor: (f: any) => {
             const isSel =
@@ -216,13 +202,15 @@ export function MapViewport({ onExplore, activeRegion }: Props) {
               stateNameToCode.current[(f.properties?.name ?? '').toLowerCase()] ===
                 selectedState
             if (zoomLevel === 'STATE')
-              return isSel ? [0, 0, 0, 0] : [235, 232, 225, 90] // dim others
+              return isSel ? [0, 0, 0, 0] : [18, 22, 30, 140]
             const score = scoreForFeature(f)
-            if (score == null) return [235, 232, 225, 120]
-            const [r, g, b] = scoreColor(score)
-            return [r, g, b, 175]
+            if (score == null) return [30, 36, 48, 160]
+            const [r, g, b] = colorForScore(score, nationalScores)
+            return [r, g, b, 210]
           },
-          updateTriggers: { getFillColor: [scores, selectedState, zoomLevel] },
+          updateTriggers: {
+            getFillColor: [scores, selectedState, zoomLevel, nationalScores.length],
+          },
           onHover: (info: any) =>
             zoomLevel === 'NATIONAL' &&
             setHovered(info.object?.properties?.name ?? null),
@@ -232,88 +220,85 @@ export function MapViewport({ onExplore, activeRegion }: Props) {
       )
     }
 
-    if (zoomLevel === 'STATE' && cells.length) {
-      // Seamless tiles (no gap) over a dense grid → reads as a smooth field.
-      const dLng = gridStep(cells.map((c) => c.coordinates[0]))
-      const dLat = gridStep(cells.map((c) => c.coordinates[1]))
-      const hx = dLng * 0.5
-      const hy = dLat * 0.5
-
-      // Per-state CONTRAST STRETCH: normalize each cell against this state's own
-      // mean/spread and amplify, so small score differences become big color
-      // differences and the whole red→green ramp is used (ask #4).
-      const ss = cells.map((c) => c.score)
-      const mean = ss.reduce((a, b) => a + b, 0) / ss.length
-      const sd =
-        Math.sqrt(ss.reduce((a, b) => a + (b - mean) ** 2, 0) / ss.length) || 1
-      const GAIN = 26 // higher = more extreme color separation
-      const stretch = (s: number) =>
-        Math.max(2, Math.min(98, 50 + ((s - mean) / sd) * GAIN))
-
+    if (zoomLevel === 'STATE' && countyGeo?.features?.length) {
       out.push(
-        new PolygonLayer({
-          id: 'state-heat-cells',
-          data: cells,
-          getPolygon: (d: HeatCell) => {
-            const [x, y] = d.coordinates
-            return [
-              [x - hx, y - hy],
-              [x + hx, y - hy],
-              [x + hx, y + hy],
-              [x - hx, y + hy],
-            ]
-          },
-          getFillColor: (d: HeatCell) => {
-            const [r, g, b] = scoreColor(stretch(d.score))
-            return [r, g, b, 230]
-          },
-          stroked: false,
-          filled: true,
+        new GeoJsonLayer({
+          id: 'county-lines',
+          data: countyGeo,
+          stroked: true,
+          filled: false,
           pickable: false,
-          updateTriggers: { getFillColor: [cells] },
+          getLineColor: [255, 255, 255, 55],
+          lineWidthMinPixels: 0.6,
+          lineWidthMaxPixels: 1.2,
         }),
       )
     }
 
-    if (zoomLevel === 'STATE' && regionFC) {
+    if (zoomLevel === 'STATE' && districtGeo?.features?.length) {
       out.push(
         new GeoJsonLayer({
-          id: 'congress-regions',
-          data: regionFC as any,
+          id: 'congressional-districts',
+          data: districtGeo,
           stroked: true,
           filled: true,
           pickable: true,
           autoHighlight: true,
-          highlightColor: [26, 25, 22, 60],
-          getLineColor: (f: any) =>
-            selectedRegion?.id === f.properties.id
-              ? [26, 25, 22, 255]
-              : [26, 25, 22, 150],
-          getLineWidth: (f: any) => (selectedRegion?.id === f.properties.id ? 3 : 1.4),
+          highlightColor: [251, 191, 36, 80],
+          getLineColor: (f: any) => {
+            const sel = selectedDistrict?.id === f.properties?.id
+            return sel ? [251, 191, 36, 255] : [255, 255, 255, 100]
+          },
+          getLineWidth: (f: any) =>
+            selectedDistrict?.id === f.properties?.id ? 2.5 : 1,
           lineWidthUnits: 'pixels',
-          getFillColor: (f: any) =>
-            selectedRegion?.id === f.properties.id ? [200, 85, 61, 45] : [0, 0, 0, 0],
+          getFillColor: (f: any) => {
+            const score = f.properties?.score ?? 50
+            const [r, g, b] = colorForScore(score, districtScores)
+            const sel = selectedDistrict?.id === f.properties?.id
+            return [r, g, b, sel ? 240 : 215]
+          },
           updateTriggers: {
-            getLineColor: [selectedRegion],
-            getLineWidth: [selectedRegion],
-            getFillColor: [selectedRegion],
+            getFillColor: [districtScores.join(','), selectedDistrict?.id],
+            getLineColor: [selectedDistrict?.id],
+            getLineWidth: [selectedDistrict?.id],
           },
           onClick: (info: any) => {
             const id = info.object?.properties?.id
-            const r = regions.find((x) => x.id === id)
-            if (r) setSelectedRegion(r)
+            const d = districts.find((x) => x.id === id)
+            if (d) setSelectedDistrict(d)
           },
-          onHover: (info: any) => setHovered(info.object?.properties?.label ?? null),
+          onHover: (info: any) =>
+            setHovered(info.object?.properties?.label ?? null),
         }),
       )
     }
-    return out
-  }, [statesGeo, scores, zoomLevel, cells, regionFC, selectedRegion, selectedState, regions])
 
-  if (!mounted) return <div className="map-canvas map-canvas--loading" />
+    return out
+  }, [
+    statesGeo,
+    scores,
+    zoomLevel,
+    districtGeo,
+    countyGeo,
+    selectedDistrict,
+    selectedState,
+    districts,
+    nationalScores,
+    districtScores,
+  ])
+
+  if (!mounted) {
+    return <div className="map-canvas map-canvas--loading map-canvas--dark" />
+  }
+
+  const districtLabel = selectedDistrict
+    ? selectedDistrict.label.split('·').pop()?.trim() ?? selectedDistrict.label
+    : null
 
   return (
-    <div className="map-viewport" ref={containerRef}>
+    <div className="map-viewport map-viewport--dark" ref={containerRef}>
+      <div className="map-viewport__grid" aria-hidden />
       <DeckGL
         viewState={viewState as any}
         onViewStateChange={(e: any) => setViewState(e.viewState)}
@@ -321,17 +306,22 @@ export function MapViewport({ onExplore, activeRegion }: Props) {
         layers={layers}
         style={{ position: 'absolute', inset: '0' }}
         getTooltip={({ object }: any) => {
-          if (zoomLevel === 'NATIONAL' && object?.properties?.name)
+          if (zoomLevel === 'NATIONAL' && object?.properties?.name) {
+            const score = scoreForFeature(object)
             return {
-              text: `${object.properties.name} — score ${scoreForFeature(object) ?? 'n/a'}`,
+              text: `${object.properties.name} — consensus ${score ?? 'n/a'}`,
             }
-          if (zoomLevel === 'STATE' && object?.properties?.label)
-            return { text: `${object.properties.label} — consensus ${object.properties.score}` }
+          }
+          if (zoomLevel === 'STATE' && object?.properties?.label) {
+            return {
+              text: `${object.properties.label} — consensus ${object.properties.score}`,
+            }
+          }
           return null
         }}
       />
 
-      <div className="map-breadcrumb">
+      <div className="map-breadcrumb map-breadcrumb--dark">
         <button
           className="map-breadcrumb__crumb"
           onClick={backToNational}
@@ -347,51 +337,46 @@ export function MapViewport({ onExplore, activeRegion }: Props) {
             </span>
           </>
         )}
-        {selectedRegion && (
+        {districtLabel && (
           <>
             <span className="map-breadcrumb__sep">/</span>
             <span className="map-breadcrumb__crumb map-breadcrumb__crumb--active">
-              District {selectedRegion.index + 1}
+              {districtLabel}
             </span>
           </>
         )}
       </div>
 
+      <ColorScaleLegend
+        extent={scoreExtentView}
+        mode={zoomLevel === 'NATIONAL' ? 'national' : 'state'}
+      />
+
       {zoomLevel === 'NATIONAL' && hovered && (
-        <div className="map-hover-hint">Hovering {hovered} · click to open state</div>
-      )}
-
-      {zoomLevel === 'STATE' && (
-        <div className="map-region-help">
-          {selectedRegion
-            ? `${selectedRegion.label} selected — hit Explore to pull land + analysis`
-            : 'Click a congressional district to select its granular heatmap'}
+        <div className="map-hover-hint map-hover-hint--dark">
+          {hovered} · click to explore districts
         </div>
       )}
 
-      {zoomLevel === 'STATE' && (
-        <div className="heat-legend">
-          <span className="heat-legend__title">Land suitability (within state)</span>
-          <div
-            className="heat-legend__bar"
-            style={{
-              background: `linear-gradient(90deg, ${[0, 25, 42, 50, 58, 75, 100]
-                .map((s) => scoreColorCss(s))
-                .join(', ')})`,
-            }}
-          />
-          <div className="heat-legend__ticks">
-            <span>Lower</span>
-            <span>Higher</span>
-          </div>
+      {zoomLevel === 'STATE' && !loadingState && (
+        <div className="map-region-help map-region-help--dark">
+          {selectedDistrict
+            ? `${selectedDistrict.label} — score ${selectedDistrict.score} · Explore for land listings`
+            : 'Click a congressional district to inspect its property score'}
         </div>
       )}
 
-      {zoomLevel === 'STATE' && selectedRegion && (
+      {loadingState && (
+        <div className="map-region-help map-region-help--dark map-region-help--loading">
+          Loading congressional districts…
+        </div>
+      )}
+
+      {zoomLevel === 'STATE' && selectedDistrict && (
         <FloatingActionDrawer
-          region={selectedRegion}
-          isExploring={activeRegion === selectedRegion.id}
-          onExplore={() => onExplore(selectedRegion)}
+          region={selectedDistrict}
+          isExploring={activeRegion === selectedDistrict.id}
+          onExplore={() => onExplore(selectedDistrict)}
         />
       )}
     </div>

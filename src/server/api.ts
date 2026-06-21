@@ -9,8 +9,15 @@ import {
 import {
   generateStateCells,
   generateStateRegions,
+  generateScoredDistricts,
+  findDistrictById,
   hasStateMeta,
 } from '~/lib/mapGeo'
+import {
+  congressionalDistrictsForState,
+  countiesForState,
+  districtCentroid,
+} from '~/lib/cdBoundaries'
 import {
   executeBrowserbaseScrapePipeline,
   scrapeLandListings,
@@ -168,7 +175,55 @@ map.get('/state/:code/heatmap', async (c) => {
   return c.json({ source: 'seed', code, cells: generateStateCells(code) })
 })
 
-// --- Congressional regions for a state (ask #3) -----------------------------
+// --- Congressional districts with real boundaries + per-district scores --------
+map.get('/state/:code/congressional-districts', async (c) => {
+  const code = c.req.param('code').toUpperCase()
+  try {
+    const fc = await congressionalDistrictsForState(code)
+    const numbers = fc.features.map((f) => f.properties.number)
+    const stateScore = STATE_SCORES[code]?.aggregateScore
+    const districts = generateScoredDistricts(code, numbers, stateScore)
+    const scoreById = Object.fromEntries(districts.map((d) => [d.id, d.score]))
+
+    const geojson: GeoJSON.FeatureCollection = {
+      type: 'FeatureCollection',
+      features: fc.features.map((f) => ({
+        ...f,
+        properties: {
+          ...f.properties,
+          score: scoreById[f.properties.id] ?? 50,
+        },
+      })),
+    }
+
+    const enriched = districts.map((d) => {
+      const feat = fc.features.find((f) => f.properties.id === d.id)
+      return {
+        ...d,
+        center: feat ? districtCentroid(feat.geometry) : d.center,
+      }
+    })
+
+    return c.json({ source: 'us-atlas', code, districts: enriched, geojson })
+  } catch (err) {
+    console.error('[map] congressional districts failed:', err)
+    return c.json({ source: 'error', code, districts: [], geojson: { type: 'FeatureCollection', features: [] } })
+  }
+})
+
+// --- County boundary lines for state overlay ---------------------------------
+map.get('/state/:code/counties', async (c) => {
+  const code = c.req.param('code').toUpperCase()
+  try {
+    const geojson = await countiesForState(code)
+    return c.json({ source: 'us-atlas', code, geojson })
+  } catch (err) {
+    console.error('[map] counties failed:', err)
+    return c.json({ source: 'error', code, geojson: { type: 'FeatureCollection', features: [] } })
+  }
+})
+
+// --- Congressional regions for a state (legacy strip fallback) --------------
 map.get('/state/:code/regions', async (c) => {
   const code = c.req.param('code').toUpperCase()
   const redis = getRedis()
@@ -184,8 +239,12 @@ map.get('/state/:code/regions', async (c) => {
 // otherwise (and on any failure) it serves the seeded/cached record.
 map.post('/region/:regionId/deep-dive', async (c) => {
   const regionId = c.req.param('regionId')
-  const code = regionId.split('-r')[0] ?? ''
-  const region = generateStateRegions(code).find((r) => r.id === regionId)
+  const region =
+    findDistrictById(regionId) ??
+    (() => {
+      const code = regionId.split('-r')[0] ?? ''
+      return generateStateRegions(code).find((r) => r.id === regionId) ?? null
+    })()
   if (!region) return c.json({ error: 'unknown region', regionId }, 404)
 
   const liveMode = c.req.header('x-live-mode') === 'true'

@@ -17,7 +17,7 @@ export function FloatingActionDrawer({ region, isExploring, onExplore }: Props) 
       <div className="action-drawer__head">
         <div>
           <div className="action-drawer__eyebrow">
-            Congressional district · near {region.city}
+            Congressional district {region.number ?? region.index + 1} · {region.city}
           </div>
           <h3 className="action-drawer__title">{region.label}</h3>
         </div>

@@ -1,6 +1,18 @@
 // Client-side fetchers + types for the interactive map. Thin wrappers over the
 // /api/map/* routes; designed for use with TanStack Query in the map page.
 
+export {
+  scoreColor,
+  scoreColorCss,
+  colorForScore,
+  colorForScoreCss,
+  toRelativeScore,
+  scoreExtent,
+  legendGradientCss,
+  LEGEND_TICKS,
+  COLOR_STOPS,
+} from '~/lib/mapScores'
+
 export interface StateScore {
   code: string
   name: string
@@ -27,6 +39,12 @@ export interface CongressRegion {
   xMax: number
   zips: string[]
   city: string
+  number?: number
+}
+
+export interface ScoredDistrict extends CongressRegion {
+  number: number
+  geometry?: GeoJSON.Geometry
 }
 
 export interface LandListing {
@@ -40,6 +58,7 @@ export interface LandListing {
   lat: number
   lng: number
   images: string[]
+  imageUnavailable?: boolean
   sources: { title: string; url: string }[]
 }
 
@@ -95,6 +114,18 @@ export const mapClient = {
       `/api/map/state/${code}/regions`,
     ),
 
+  congressionalDistricts: (code: string) =>
+    getJson<{
+      code: string
+      districts: ScoredDistrict[]
+      geojson: GeoJSON.FeatureCollection
+    }>(`/api/map/state/${code}/congressional-districts`),
+
+  counties: (code: string) =>
+    getJson<{ code: string; geojson: GeoJSON.FeatureCollection }>(
+      `/api/map/state/${code}/counties`,
+    ),
+
   // Region deep-dive: live mode opt-in via header.
   regionDeepDive: async (
     regionId: string,
@@ -126,38 +157,3 @@ export const mapClient = {
     fetch(`/api/map/liked/${id}`, { method: 'DELETE' }).then((r) => r.json()),
 }
 
-// Shared consensus → color ramp. Diverging red→sand→green, tuned to read like a
-// stock-trading heatmap (Finviz): low consensus = red (bearish), mid = neutral
-// sand, high = green (bullish). Color maps DIRECTLY to the 0–100 score, so two
-// tiles of different color always represent different consensus.
-const COLOR_STOPS: [number, [number, number, number]][] = [
-  [0, [178, 34, 40]], // deep red
-  [25, [216, 78, 62]], // red
-  [42, [226, 146, 96]], // orange
-  [50, [222, 199, 142]], // neutral sand
-  [58, [150, 196, 122]], // pale green
-  [75, [74, 167, 94]], // green
-  [100, [22, 110, 58]], // deep green
-]
-
-export function scoreColor(score: number): [number, number, number] {
-  const s = Math.max(0, Math.min(100, score))
-  for (let i = 0; i < COLOR_STOPS.length - 1; i++) {
-    const [s0, c0] = COLOR_STOPS[i]!
-    const [s1, c1] = COLOR_STOPS[i + 1]!
-    if (s <= s1) {
-      const t = s1 === s0 ? 0 : (s - s0) / (s1 - s0)
-      return [
-        Math.round(c0[0] + (c1[0] - c0[0]) * t),
-        Math.round(c0[1] + (c1[1] - c0[1]) * t),
-        Math.round(c0[2] + (c1[2] - c0[2]) * t),
-      ]
-    }
-  }
-  return COLOR_STOPS[COLOR_STOPS.length - 1]![1]
-}
-
-export function scoreColorCss(score: number, alpha = 1): string {
-  const [r, g, b] = scoreColor(score)
-  return `rgba(${Math.round(r)}, ${Math.round(g)}, ${Math.round(b)}, ${alpha})`
-}

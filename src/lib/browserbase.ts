@@ -1,25 +1,25 @@
 // ---------------------------------------------------------------------------
 // Browserbase headless web-extraction pipeline (master plan §3B).
 //
-// When a deep-dive is requested, this spins up hidden browser sessions and
-// scrapes three source vectors in parallel:
-//   1. municipal permit portals  (permit volume / approval velocity)
-//   2. public zoning GIS layouts  (buildable vs. restricted designations)
-//   3. community discussion boards (development sentiment)
-//
-// Env-guarded: with no BROWSERBASE_API_KEY the pipeline returns realistic mock
-// scrape blocks so the whole deep-dive flow is demoable offline. The mock data
-// is intentionally noisy/HTML-ish so the compression pass in compression.ts has
-// something real to strip.
+// Image extraction is ISOLATED in imageScraper.ts + imageVerification.ts:
+// live currentSrc from marketplace CDNs, provenance guards, vision/reachability
+// gate, DuckDuckGo ZIP fallback — NEVER picsum stock photos.
 // ---------------------------------------------------------------------------
 
 import { getDistrict } from '~/lib/mapData'
-import { generateStateRegions } from '~/lib/mapGeo'
+import { withBrowserbasePage, hasBrowserbaseKey } from '~/lib/browserbaseCore'
+import {
+  scrapeRawListingCards,
+  hydrateCardImages,
+  regionContextFor,
+  type RawListingCard,
+} from '~/lib/imageScraper'
+import { resolveRegion, stateCodeFromRegionId } from '~/lib/regionContext'
 
 export interface ScrapeResult {
   district: string
-  blocks: string[] // raw text blocks, one per source vector
-  live: boolean // true if a real Browserbase session ran
+  blocks: string[]
+  live: boolean
 }
 
 export interface LandListing {
@@ -32,7 +32,8 @@ export interface LandListing {
   zone: string
   lat: number
   lng: number
-  images: string[] // multiple shots for the carousel (Browserbase-grabbed)
+  images: string[]
+  imageUnavailable?: boolean
   sources: { title: string; url: string }[]
 }
 
@@ -40,61 +41,21 @@ function mockScrapeBlocks(districtId: string, projectType: string): string[] {
   const d = getDistrict(districtId)
   const name = d?.regionalName ?? districtId
   return [
-    // Source 1: permit portal (noisy, table-ish).
     `<table class="permit-history-grid"><tr><td>${name} ${projectType} permit #2026-0${
       Math.floor(Math.random() * 900) + 100
-    } APPROVED in 34 days</td></tr><tr><td>Average permit approval velocity this quarter: 41 days, down from 58.</td></tr><tr><td>Two ${projectType} applications were rejected for setback variance issues.</td></tr></table>`,
-    // Source 2: zoning GIS JSON-ish.
-    `<div class="zoning-matrix">{ "parcel": "buildable", "zone": "mixed-use MU-3", "restricted": "12% protected/tribal", "setback": "10ft front", "notes": "CEQA exemption likely under infill provisions" }</div>`,
-    // Source 3: community sentiment thread.
-    `<div class="post-body-content">Lots of local support for new ${projectType} zoning here. One neighbor opposed citing traffic; most comments approve of faster permit timelines. A contractor noted inspection delays add ~2 weeks of cost.</div>`,
+    } APPROVED in 34 days</td></tr><tr><td>Average permit approval velocity this quarter: 41 days, down from 58.</td></tr></table>`,
+    `<div class="zoning-matrix">{ "parcel": "buildable", "zone": "mixed-use MU-3", "restricted": "12% protected/tribal" }</div>`,
+    `<div class="post-body-content">Local support for new ${projectType} zoning; contractor noted inspection delays ~2 weeks.</div>`,
   ]
 }
 
-// ---------------------------------------------------------------------------
-// LIVE Browserbase wiring.
-//
-// `withBrowserbasePage` is the one place that talks to Browserbase: it creates
-// a cloud browser session (with residential proxies + stealth so real-estate
-// and gov sites don't block us), connects Playwright to it over the CDP
-// `connectUrl`, hands you a ready `page`, and always tears the session down.
-//
-// Heavy deps (`@browserbasehq/sdk`, `playwright-core`) are loaded with dynamic
-// import() so they only load server-side at call time — never bundled into the
-// client and never required unless a live scrape actually runs.
-// ---------------------------------------------------------------------------
-async function withBrowserbasePage<T>(
-  fn: (page: any) => Promise<T>,
-): Promise<T> {
-  const { default: Browserbase } = await import('@browserbasehq/sdk')
-  const { chromium } = await import('playwright-core')
-
-  const bb = new Browserbase({ apiKey: process.env.BROWSERBASE_API_KEY!.trim() })
-  const session = await bb.sessions.create({
-    projectId: process.env.BROWSERBASE_PROJECT_ID!.trim(),
-    proxies: true, // residential routing so listing/gov sites don't block us
-  })
-  const browser = await chromium.connectOverCDP(session.connectUrl)
-  try {
-    const ctx = browser.contexts()[0]
-    const page = ctx?.pages()[0] ?? (await ctx!.newPage())
-    return await fn(page)
-  } finally {
-    await browser.close().catch(() => {})
-  }
-}
-
-// Real research scrape: DuckDuckGo's HTML endpoint is JS-free and scrape-
-// friendly, returning permit / zoning / sentiment snippets for the region's
-// zip that the compression pass + ASI:One then reason over.
 async function liveScrapeBlocks(
   districtId: string,
   _projectType: string,
 ): Promise<string[]> {
-  const code = districtId.split('-r')[0] ?? ''
-  const region = generateStateRegions(code).find((r) => r.id === districtId)
-  const stateName = (region?.label ?? code).split('·')[0]!.trim()
-  const zip = region?.zips[0] ?? ''
+  const { region, zips } = regionContextFor(districtId)
+  const stateName = (region?.label ?? stateCodeFromRegionId(districtId)).split('·')[0]!.trim()
+  const zip = zips[0] ?? ''
 
   const queries = [
     `${stateName} ${zip} building permit approval velocity zoning land use`,
@@ -119,7 +80,7 @@ async function liveScrapeBlocks(
         )
         if (text) blocks.push(text)
       } catch {
-        /* skip a failed query, keep whatever we got */
+        /* skip failed query */
       }
     }
     if (!blocks.length) throw new Error('no research snippets scraped')
@@ -127,90 +88,38 @@ async function liveScrapeBlocks(
   })
 }
 
-// In-page extractor for a LandSearch results page. Returns raw card fields.
-function landSearchPageExtract(): any[] {
-  const cards = Array.from(
-    document.querySelectorAll('article.preview, article[data-uid^="card-"]'),
+function buildListingSources(r: RawListingCard, zip: string): LandListing['sources'] {
+  const out: LandListing['sources'] = []
+  if (r.href) out.push({ title: `${r.source} listing — ${zip}`, url: r.href })
+  out.push(
+    { title: `Zillow land watch — ${zip}`, url: `https://www.zillow.com/homes/${zip}_rb/land_type/` },
+    { title: `LandWatch — ${zip}`, url: `https://www.landwatch.com/${zip}` },
   )
-  const out: any[] = []
-  for (const card of cards) {
-    const a = card.querySelector('a[href*="/properties/"]') as HTMLAnchorElement | null
-    if (!a) continue
-    const img = card.querySelector('img') as HTMLImageElement | null
-    const alt = img?.getAttribute('alt') ?? ''
-    const images = Array.from(card.querySelectorAll('img'))
-      .map((i) => (i as HTMLImageElement).currentSrc || (i as HTMLImageElement).src || i.getAttribute('data-src') || '')
-      .filter((s) => s.includes('cdn.landsearch.com'))
-    let center: any = null
-    try {
-      center = JSON.parse(card.getAttribute('data-context') || '{}').center
-    } catch {
-      /* no geo */
-    }
-    out.push({
-      source: 'LandSearch',
-      href: 'https://www.landsearch.com' + a.getAttribute('href'),
-      text: (card as HTMLElement).innerText.replace(/\s+/g, ' ').trim(),
-      alt,
-      images,
-      center,
-    })
-    if (out.length >= 8) break
-  }
   return out
 }
 
-// In-page extractor for a Realtor.com land-search page. Robust to class churn:
-// anchor from each real listing photo (rdcpix CDN) up to its card, then read
-// the price/acreage/address text + detail link.
-function realtorPageExtract(): any[] {
-  const imgs = Array.from(document.querySelectorAll('img')).filter((i) =>
-    ((i as HTMLImageElement).currentSrc || (i as HTMLImageElement).src || '').includes('rdcpix'),
-  )
-  const out: any[] = []
-  const seen = new Set<Element>()
-  for (const img of imgs) {
-    const card = (img.closest('li, article, div[data-testid]') || img.parentElement) as Element | null
-    if (!card || seen.has(card)) continue
-    seen.add(card)
-    const text = (card as HTMLElement).innerText.replace(/\s+/g, ' ').trim()
-    if (!/\$[\d,]{4,}/.test(text)) continue
-    const a = card.querySelector('a[href*="realestateandhomes-detail"]') as HTMLAnchorElement | null
-    out.push({
-      source: 'Realtor.com',
-      href: a?.href ?? '',
-      text,
-      alt: '',
-      images: [(img as HTMLImageElement).currentSrc || (img as HTMLImageElement).src],
-      center: null,
-    })
-    if (out.length >= 6) break
-  }
-  return out
-}
-
-function normalizeRawListing(
-  r: any,
+function cardToListing(
+  r: RawListingCard,
   regionId: string,
   i: number,
-  region: any,
+  region: ReturnType<typeof resolveRegion>,
   fallbackZip: string,
+  imagePack: { images: string[]; imageUnavailable: boolean },
 ): LandListing | null {
   const priceMatch = r.text.match(/\$\d{1,3}(?:,\d{3})+/)
   if (!priceMatch) return null
   const priceNum = Number(priceMatch[0].replace(/[$,]/g, ''))
-  // Parse acreage from the clean alt text ("0.29 Acres of …") when available —
-  // the card's innerText concatenates price+acreage with no separator, which
-  // corrupts a naive regex (e.g. "$82,499" + "0.29" → "4990.29").
-  const acresSource: string = /acres?/i.test(r.alt) ? r.alt : r.text
+  const acresSource = /acres?/i.test(r.alt) ? r.alt : r.text
   const acresMatch = acresSource.match(/(\d+(?:\.\d+)?)\s*acres?/i)
-  const acres = acresMatch ? parseFloat(acresMatch[1]) : 0
+  const acres = acresMatch ? parseFloat(acresMatch[1] ?? '0') : 0
   const loc: string = (r.text.match(/[A-Z][A-Za-z .]+,\s*[A-Z]{2}\s*\d{5}/) || [])[0] || ''
   const zipMatch = loc.match(/\b(\d{5})\b/)
-  const cityState = (loc.match(/([A-Za-z .]+),\s*([A-Z]{2})/) || [])[0] || loc || region?.city || ''
-  const landType = (r.alt.match(/(Residential|Commercial|Agricultural|Recreational|Industrial|Vacant)\s+Land/i) || [])[0]
+  const cityState =
+    (loc.match(/([A-Za-z .]+),\s*([A-Z]{2})/) || [])[0] || loc || region?.city || ''
+  const landType =
+    (r.alt.match(/(Residential|Commercial|Agricultural|Recreational|Industrial|Vacant)\s+Land/i) ||
+      [])[0]
   const ppa = acres > 0 ? Math.round(priceNum / acres) : 0
-  const images: string[] = (r.images || []).filter((s: string) => s && s.startsWith('http')).slice(0, 6)
 
   return {
     id: `${regionId}-plot-${i}`,
@@ -220,78 +129,49 @@ function normalizeRawListing(
     pricePerAcre: ppa ? `$${(ppa / 1000).toFixed(0)}K/ac` : '—',
     acreage: acres ? `${acres} ac` : '—',
     zone: landType || 'Vacant land',
-    lng: Array.isArray(r.center) ? r.center[0] : (region?.center[0] ?? -98),
-    lat: Array.isArray(r.center) ? r.center[1] : (region?.center[1] ?? 39),
-    images, // may be [] → frontend renders a "no image" diagram
-    sources: [
-      { title: `${r.source} — ${zipMatch?.[1] ?? fallbackZip}`, url: r.href || '#' },
-    ],
+    lng: r.center?.[0] ?? region?.center[0] ?? -98,
+    lat: r.center?.[1] ?? region?.center[1] ?? 39,
+    images: imagePack.images,
+    imageUnavailable: imagePack.imageUnavailable,
+    sources: buildListingSources(r, zipMatch?.[1] ?? fallbackZip),
   }
 }
 
-// Multi-source live listings. Searches several land marketplaces across the
-// REGION'S real zip codes (nearest-city zips from mapGeo) so results are
-// actually in the chosen area — not always the biggest metro.
 async function liveScrapeLandListings(regionId: string): Promise<LandListing[]> {
-  const code = regionId.split('-r')[0] ?? ''
-  const region = generateStateRegions(code).find((r) => r.id === regionId)
-  const zips = region?.zips?.length ? region.zips : ['90001']
+  const { region, zips, state, city } = regionContextFor(regionId)
   const primaryZip = zips[0]!
 
-  const raw = await withBrowserbasePage(async (page) => {
-    const collected: any[] = []
+  return withBrowserbasePage(
+    async (page) => {
+      const raw = await scrapeRawListingCards(page, region, zips)
+      const listings: LandListing[] = []
+      const seen = new Set<string>()
 
-    // Source 1 — LandSearch on the primary (and a secondary) area zip.
-    for (const zip of zips.slice(0, 2)) {
-      if (collected.length >= 6) break
-      try {
-        await page.goto(`https://www.landsearch.com/properties/${zip}`, {
-          waitUntil: 'domcontentloaded',
-          timeout: 45_000,
-        })
-        await page.waitForTimeout(4000)
-        collected.push(...(await page.evaluate(landSearchPageExtract)))
-      } catch {
-        /* try next source/zip */
-      }
-    }
-
-    // Source 2 — Realtor.com land for the primary area zip.
-    if (collected.length < 6) {
-      try {
-        await page.goto(
-          `https://www.realtor.com/realestateandhomes-search/${primaryZip}/type-land`,
-          { waitUntil: 'domcontentloaded', timeout: 45_000 },
+      for (let i = 0; i < raw.length && listings.length < 8; i++) {
+        const card = raw[i]!
+        const zipForFallback = card.text.match(/\b(\d{5})\b/)?.[1] ?? primaryZip
+        const imagePack = await hydrateCardImages(page, card, zipForFallback, city)
+        const listing = cardToListing(
+          card,
+          regionId,
+          listings.length,
+          region,
+          primaryZip,
+          imagePack,
         )
-        await page.waitForTimeout(4000)
-        collected.push(...(await page.evaluate(realtorPageExtract)))
-      } catch {
-        /* best-effort */
+        if (!listing) continue
+        const key = `${listing.price}|${listing.zip}|${listing.acreage}`
+        if (seen.has(key)) continue
+        seen.add(key)
+        listings.push(listing)
       }
-    }
-    return collected
-  })
 
-  // Normalize + dedupe by price+zip so the two sources don't repeat a parcel.
-  const listings: LandListing[] = []
-  const seen = new Set<string>()
-  for (let i = 0; i < raw.length; i++) {
-    const l = normalizeRawListing(raw[i], regionId, listings.length, region, primaryZip)
-    if (!l) continue
-    const key = `${l.price}|${l.zip}|${l.acreage}`
-    if (seen.has(key)) continue
-    seen.add(key)
-    listings.push(l)
-    if (listings.length >= 8) break
-  }
-  if (!listings.length) throw new Error('no listings parsed from any source')
-  return listings
+      if (!listings.length) throw new Error('no listings parsed from any source')
+      return listings
+    },
+    { state, advancedStealth: true },
+  )
 }
-
-// --- Land-for-sale listings (master plan §3B, extended) ---------------------
-// When a user clicks a specific region, Browserbase scrapes real-estate/land
-// marketplaces filtered to that region's zip codes and returns concrete parcels
-// for sale with photos. Env-guarded: mock generates plausible per-zip parcels.
 
 const LAND_TITLES = [
   'Vacant residential parcel',
@@ -314,25 +194,18 @@ function hash(s: string): number {
   return h >>> 0
 }
 
-/** Browserbase-grabbed photos. picsum returns real, stable images by seed. */
-function listingImages(seed: string, n = 4): string[] {
-  return Array.from(
-    { length: n },
-    (_, i) => `https://picsum.photos/seed/${seed}-${i}/720/460`,
-  )
-}
-
+/** Offline mock parcels — no stock photos; imageUnavailable until live scrape runs. */
 function mockListingsForRegion(regionId: string): LandListing[] {
-  const code = regionId.split('-r')[0] ?? ''
-  const region = generateStateRegions(code).find((r) => r.id === regionId)
-  const zips = region?.zips ?? ['00000']
+  const region = resolveRegion(regionId)
+  const zips = region?.zips?.length ? region.zips : ['90001']
   const [cLng, cLat] = region?.center ?? [-98, 39]
+  const count = 5 + (hash(regionId) % 3)
   const listings: LandListing[] = []
-  const count = 5 + (hash(regionId) % 3) // 5–7 plots
+
   for (let i = 0; i < count; i++) {
     const h = hash(`${regionId}:${i}`)
     const zip = zips[i % zips.length]!
-    const acres = 0.2 + (h % 60) / 10 // 0.2 – 6.2 ac
+    const acres = 0.2 + (h % 60) / 10
     const ppa = 180_000 + (h % 12) * 55_000
     const price = Math.round(acres * ppa)
     listings.push({
@@ -345,27 +218,23 @@ function mockListingsForRegion(regionId: string): LandListing[] {
       zone: ZONES[h % ZONES.length]!,
       lng: cLng + (((h % 100) - 50) / 100) * 0.4,
       lat: cLat + ((((h >> 7) % 100) - 50) / 100) * 0.3,
-      images: listingImages(`${regionId}-${i}`),
+      images: [],
+      imageUnavailable: true,
       sources: [
         { title: `LandWatch listing — ${zip}`, url: `https://www.landwatch.com/${zip}` },
-        { title: `Zillow land — ${zip}`, url: `https://www.zillow.com/homes/${zip}_rb/` },
+        { title: `Zillow land watch — ${zip}`, url: `https://www.zillow.com/homes/${zip}_rb/land_type/` },
       ],
     })
   }
   return listings
 }
 
-/**
- * Scrape concrete land-for-sale parcels for a region's zip codes. Always
- * resolves; live mode attempted only with a key, any failure → mock parcels.
- */
 export async function scrapeLandListings(regionId: string): Promise<{
   regionId: string
   listings: LandListing[]
   live: boolean
 }> {
-  const hasKey = Boolean(process.env.BROWSERBASE_API_KEY?.trim())
-  if (hasKey) {
+  if (hasBrowserbaseKey()) {
     try {
       const listings = await liveScrapeLandListings(regionId)
       return { regionId, listings, live: true }
@@ -376,24 +245,16 @@ export async function scrapeLandListings(regionId: string): Promise<{
   return { regionId, listings: mockListingsForRegion(regionId), live: false }
 }
 
-/**
- * Spawn the parallel scrape pipeline for a district. Always resolves: live mode
- * is attempted only when a key is present, and any failure degrades to mock.
- */
 export async function executeBrowserbaseScrapePipeline(
   districtId: string,
   projectType = 'mixed_use',
 ): Promise<ScrapeResult> {
-  const hasKey = Boolean(process.env.BROWSERBASE_API_KEY)
-  if (hasKey) {
+  if (hasBrowserbaseKey()) {
     try {
       const blocks = await liveScrapeBlocks(districtId, projectType)
       return { district: districtId, blocks, live: true }
     } catch (err) {
-      console.warn(
-        '[browserbase] live scrape failed, using mock:',
-        (err as Error).message,
-      )
+      console.warn('[browserbase] live scrape failed, using mock:', (err as Error).message)
     }
   }
   return {

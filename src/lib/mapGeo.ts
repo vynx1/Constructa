@@ -15,16 +15,17 @@ export interface HeatCell {
 }
 
 export interface CongressRegion {
-  id: string // e.g. "CA-r3"
-  code: string // state code
-  index: number // 0-based strip index, west→east
-  label: string // "California · District 4"
-  score: number // 0..100 aggregate
+  id: string
+  code: string
+  index: number
+  number?: number
+  label: string
+  score: number
   center: [number, number]
-  xMin: number // longitude band (for frontend strip-clipping)
+  xMin: number
   xMax: number
-  zips: string[] // real zips for the nearest real cities in this band
-  city: string // representative city/area name for this region
+  zips: string[]
+  city: string
 }
 
 // Approximate state bounding boxes [minLng, minLat, maxLng, maxLat] + a leading
@@ -38,7 +39,7 @@ const STATE_META: Record<
   AK: { name: 'Alaska', bbox: [-170.0, 54.0, -130.0, 71.5], zip3: 995, cds: 1 },
   AZ: { name: 'Arizona', bbox: [-114.8, 31.3, -109.0, 37.0], zip3: 850, cds: 9 },
   AR: { name: 'Arkansas', bbox: [-94.6, 33.0, -89.6, 36.5], zip3: 720, cds: 4 },
-  CA: { name: 'California', bbox: [-124.4, 32.5, -114.1, 42.0], zip3: 900, cds: 8 },
+  CA: { name: 'California', bbox: [-124.4, 32.5, -114.1, 42.0], zip3: 900, cds: 52 },
   CO: { name: 'Colorado', bbox: [-109.1, 37.0, -102.0, 41.0], zip3: 800, cds: 8 },
   CT: { name: 'Connecticut', bbox: [-73.7, 40.9, -71.8, 42.05], zip3: 60, cds: 5 },
   DE: { name: 'Delaware', bbox: [-75.8, 38.4, -75.0, 39.8], zip3: 197, cds: 1 },
@@ -214,7 +215,7 @@ function seedOf(s: string): number {
 export function regionCount(code: string): number {
   const meta = STATE_META[code]
   if (!meta) return 5
-  return Math.max(3, Math.min(8, meta.cds)) // cap strips for readability
+  return meta.cds
 }
 
 export function hasStateMeta(code: string): boolean {
@@ -228,7 +229,75 @@ function zipFor(code: string, regionIndex: number, n: number): string {
   return String(val % 100000).padStart(5, '0')
 }
 
-/** Congressional-region partition with aggregate scores. */
+/** Deterministic per-district consensus score (0–100). */
+export function districtScoreFor(
+  code: string,
+  districtNumber: number,
+  stateBase = 62,
+): number {
+  const s = seedOf(`${code}:cd:${districtNumber}`)
+  const s2 = seedOf(`${code}:cd:${districtNumber}:fine`)
+  const regional = (s - 0.5) * 28 + (s2 - 0.5) * 12
+  return Math.max(8, Math.min(97, Math.round(stateBase + regional)))
+}
+
+/**
+ * Build scored congressional-district records for real CD numbers.
+ * Each district gets its own property/consensus score.
+ */
+export function generateScoredDistricts(
+  codeRaw: string,
+  districtNumbers: number[],
+  stateBaseScore?: number,
+): CongressRegion[] {
+  const code = codeRaw.toUpperCase()
+  const meta = STATE_META[code]
+  if (!meta || !districtNumbers.length) return []
+
+  const [minLng, minLat, maxLng, maxLat] = meta.bbox
+  const base = stateBaseScore ?? Math.round(34 + seedOf(`${code}:state`) * 50)
+  const midLat = (minLat + maxLat) / 2
+  const lngSpan = maxLng - minLng
+
+  return districtNumbers.map((num, index) => {
+    const score = districtScoreFor(code, num, base)
+    const frac = districtNumbers.length > 1 ? index / (districtNumbers.length - 1) : 0.5
+    const xMin = minLng + frac * lngSpan * 0.85
+    const xMax = minLng + (frac + 1 / districtNumbers.length) * lngSpan * 0.85 + lngSpan * 0.05
+    const center: [number, number] = [(xMin + xMax) / 2, midLat]
+    const near = nearestCities(code, center, 4)
+    const zips = near.length
+      ? near.map((c) => c.zip)
+      : Array.from({ length: 3 }, (_, n) => zipFor(code, index, n))
+    const city = near[0]?.name ?? meta.name
+    const id = `${code}-${String(num).padStart(2, '0')}`
+    return {
+      id,
+      code,
+      index,
+      number: num,
+      label: `${meta.name} · District ${num}`,
+      score,
+      center,
+      xMin,
+      xMax,
+      zips,
+      city,
+    }
+  })
+}
+
+/** Lookup a district record by id (e.g. CA-05). */
+export function findDistrictById(regionId: string): CongressRegion | null {
+  const m = regionId.match(/^([A-Z]{2})-(\d{1,2})$/)
+  if (!m) return null
+  const code = m[1]!
+  const num = parseInt(m[2]!, 10)
+  const generated = generateScoredDistricts(code, [num])
+  return generated[0] ?? null
+}
+
+/** Congressional-region partition with aggregate scores (legacy strip fallback). */
 export function generateStateRegions(codeRaw: string): CongressRegion[] {
   const code = codeRaw.toUpperCase()
   const meta = STATE_META[code]

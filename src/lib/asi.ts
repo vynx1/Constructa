@@ -18,6 +18,7 @@ import { getRedis, keys } from '~/lib/redis'
 import { arize } from '~/lib/arize'
 import { compressScrapedContext, compressionStats } from '~/lib/compression'
 import { getDistrict } from '~/lib/mapData'
+import { resolveRegion } from '~/lib/regionContext'
 
 const ASI_BASE = () =>
   (process.env.ASI_ONE_BASE_URL ?? 'https://api.asi1.ai/v1').trim()
@@ -137,7 +138,9 @@ function hashPrompt(districtId: string, compressed: string): string {
 /** Deterministic, defensible guide when ASI:One is not configured. */
 function mockGuide(districtId: string, compressed: string, baseScore?: number): BuyingGuide {
   const d = getDistrict(districtId)
-  const base = baseScore ?? d?.aggregateConsensusScore ?? 64
+  const region = resolveRegion(districtId)
+  const regionName = region?.label?.split('·').pop()?.trim() ?? d?.regionalName ?? districtId
+  const base = baseScore ?? d?.aggregateConsensusScore ?? region?.score ?? 64
   const mentionsReject = /reject/i.test(compressed)
   const mentionsHazard = /hazard|flood|fault|fire/i.test(compressed)
 
@@ -152,8 +155,8 @@ function mockGuide(districtId: string, compressed: string, baseScore?: number): 
       key: f.key,
       label: f.label,
       score,
-      reasoning: factorBlurb(f.key, score, d?.regionalName ?? districtId),
-      sources: mockSources(f.key, d?.regionalName ?? districtId),
+      reasoning: factorBlurb(f.key, score, regionName),
+      sources: mockSources(f.key, regionName),
     }
   })
 
@@ -172,7 +175,7 @@ function mockGuide(districtId: string, compressed: string, baseScore?: number): 
           ? 'Viable with diligence'
           : 'Proceed with caution',
       reasoning:
-        `${d?.regionalName ?? districtId} scores ${base}/100 on construction consensus. ` +
+        `${regionName} scores ${base}/100 on construction consensus. ` +
         `Zoning is ${d?.guide?.zoning ?? 'mixed-use friendly'} and permit velocity is ` +
         `${d?.guide?.permits ?? 'moderate'}. ${
           mentionsReject
