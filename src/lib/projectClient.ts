@@ -18,6 +18,17 @@ export interface CachedDeepDive {
   deepDive: RegionDeepDive
 }
 
+export interface CompliancePdfMeta {
+  id: string
+  projectId: string
+  stage: string
+  dailyLogId?: string
+  filename: string
+  createdAt: string
+  referenceId: string
+  url: string
+}
+
 async function postJson<T>(url: string, body: unknown): Promise<T> {
   const res = await fetch(url, {
     method: 'POST',
@@ -72,4 +83,24 @@ export const projectClient = {
     stage?: string
     reference?: string
   }) => postJson<unknown>('/api/agents/compliance/solve', body),
+
+  /** Turn an agent's stage solution into a stored, downloadable compliance PDF. */
+  generateCompliancePdf: (body: {
+    projectId: string
+    stage: string
+    content: string
+    dailyLogId?: string
+  }) =>
+    postJson<CompliancePdfMeta>('/api/agents/compliance/pdf', body),
+
+  /** List generated compliance PDFs for a project (newest first, no bytes). */
+  listCompliancePdfs: async (projectId: string): Promise<CompliancePdfMeta[]> => {
+    const res = await fetch(`/api/agents/compliance/pdf/${projectId}`)
+    if (!res.ok) return []
+    return ((await res.json()).pdfs ?? []) as CompliancePdfMeta[]
+  },
+
+  /** Download URL for a stored compliance PDF. */
+  compliancePdfUrl: (projectId: string, id: string) =>
+    `/api/agents/compliance/pdf/${projectId}/${id}`,
 }

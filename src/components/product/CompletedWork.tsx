@@ -1,5 +1,7 @@
+
 import { useEffect, useState } from 'react'
-import { X, Check, ClipboardList, ShieldCheck, AlertCircle } from 'lucide-react'
+import { X, Check, ClipboardList, ShieldCheck, AlertCircle, FileDown } from 'lucide-react'
+import { projectClient, type CompliancePdfMeta } from '~/lib/projectClient'
 
 // #5 — "Completed work" tab. A serpentine (left→right→down→right→left) timeline
 // of cleared compliance work with status, plus the bank of completed compliance,
@@ -40,6 +42,7 @@ interface Props {
 
 export function CompletedWork({ projectId, open, refreshKey, onClose }: Props) {
   const [data, setData] = useState<ProjectData | null>(null)
+  const [pdfs, setPdfs] = useState<CompliancePdfMeta[]>([])
   const [loading, setLoading] = useState(false)
 
   useEffect(() => {
@@ -56,6 +59,10 @@ export function CompletedWork({ projectId, open, refreshKey, onClose }: Props) {
       )
       .catch(() => setData({ solvedCompliance: [], logs: [], problems: [] }))
       .finally(() => setLoading(false))
+    projectClient
+      .listCompliancePdfs(projectId)
+      .then(setPdfs)
+      .catch(() => setPdfs([]))
   }, [open, projectId, refreshKey])
 
   if (!open) return null
@@ -63,6 +70,7 @@ export function CompletedWork({ projectId, open, refreshKey, onClose }: Props) {
   // Chronological order (the record stores newest-first).
   const solved = [...(data?.solvedCompliance ?? [])].reverse()
   const logs = data?.logs ?? []
+  const logById = new Map(logs.map((l) => [l.id, l]))
   const openProblems = (data?.problems ?? []).filter((p) => !p.resolved)
   const rows = chunk(solved, 3)
 
@@ -108,6 +116,43 @@ export function CompletedWork({ projectId, open, refreshKey, onClose }: Props) {
                 </div>
               ))}
             </div>
+          )}
+        </section>
+
+        {/* Generated compliance documents (downloadable PDFs). */}
+        <section className="completed-work__section">
+          <h4 className="completed-work__section-title">
+            <FileDown size={13} /> Compliance documents
+            <span className="completed-work__count">{pdfs.length}</span>
+          </h4>
+          {pdfs.length === 0 ? (
+            <p className="completed-work__empty">
+              No compliance documents yet — auto-solve a stage and the agent files a
+              formatted PDF here.
+            </p>
+          ) : (
+            <ul className="completed-work__docs">
+              {pdfs.map((p) => {
+                const log = p.dailyLogId ? logById.get(p.dailyLogId) : undefined
+                return (
+                  <li key={p.id} className="doc-entry">
+                    <a className="doc-entry__link" href={p.url} download>
+                      <FileDown size={14} />
+                      <span className="doc-entry__name">{p.filename}</span>
+                    </a>
+                    <div className="doc-entry__meta">
+                      <span className="doc-entry__stage">{p.stage}</span>
+                      <span className="doc-entry__time">{timeAgo(p.createdAt)}</span>
+                    </div>
+                    {log && (
+                      <p className="doc-entry__log">
+                        Linked log · {log.stage}: {log.text}
+                      </p>
+                    )}
+                  </li>
+                )
+              })}
+            </ul>
           )}
         </section>
 

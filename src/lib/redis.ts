@@ -69,4 +69,8 @@ export const keys = {
   // partner keys, used to rotate partners so the same business is not shown
   // again until the user has clicked through 5 different districts.
   partnersWindow: () => `map:partners:window`,
+  // project:{id}:pdf:{pdfId} -> JSON: stored compliance PDF (base64 bytes + meta)
+  compliancePdf: (projectId: string, pdfId: string) => `project:${projectId}:pdf:${pdfId}`,
+  // project:{id}:pdfs -> List: ids of generated compliance PDFs (newest first)
+  compliancePdfIndex: (projectId: string) => `project:${projectId}:pdfs`,
 } as const

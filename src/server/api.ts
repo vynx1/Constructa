@@ -1,5 +1,11 @@
+
+
+
+
 ﻿import { Hono } from 'hono'
 import { getRedis, keys } from '~/lib/redis'
+import { formatForCompliance } from '~/lib/compliance'
+import { renderComplianceDoc } from '~/lib/compliancePdf'
 import { complete } from '~/lib/claude'
 import { scrapeLocalPartners, mockPartners , type BusinessPartner } from '~/lib/partnerScraper'
 import {
@@ -808,6 +814,118 @@ agents.get('/watchdog/:projectId/:step', async (c) => {
     // agent-service offline — fall through to mock
   }
   return c.json({ projectId, step: Number(step), conditions: [], alerts: [] })
+})
+
+
+// --- Compliance PDF generation (spec §5/§6) -------------------------------
+// Stage agent solutions are turned into compliance-formatted PDFs (via the
+// Agentverse compliance agent, or a local fallback) and stored for download
+// in the project's "Completed Work" panel — instead of dumping raw markdown.
+
+interface StoredPdf {
+  id: string
+  projectId: string
+  stage: string
+  dailyLogId?: string
+  filename: string
+  createdAt: string
+  referenceId: string
+  bytesB64: string
+}
+
+agents.post('/compliance/pdf', async (c) => {
+  const body = (await c.req.json().catch(() => ({}))) as {
+    projectId?: string
+    stage?: string
+    content?: string
+    dailyLogId?: string
+  }
+  const projectId = body.projectId ?? 'demo'
+  const stage = body.stage ?? 'General'
+  const content = body.content ?? ''
+
+  const doc = await formatForCompliance(stage, content, { projectId })
+  const bytes = await renderComplianceDoc(doc)
+  const id = doc.referenceId
+  const safeStage = stage.replace(/[^a-zA-Z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'stage'
+  const filename = `compliance-${safeStage}-${id}.pdf`
+  const createdAt = new Date().toISOString()
+
+  const stored: StoredPdf = {
+    id,
+    projectId,
+    stage,
+    dailyLogId: body.dailyLogId,
+    filename,
+    createdAt,
+    referenceId: doc.referenceId,
+    bytesB64: Buffer.from(bytes).toString('base64'),
+  }
+
+  const redis = getRedis()
+  if (redis) {
+    try {
+      await redis.set(keys.compliancePdf(projectId, id), JSON.stringify(stored), 'EX', 604800)
+      await redis.lpush(keys.compliancePdfIndex(projectId), id)
+      await redis.expire(keys.compliancePdfIndex(projectId), 604800)
+    } catch (err) {
+      console.warn('[compliance-pdf] redis write failed:', (err as Error).message)
+    }
+  }
+
+  return c.json({
+    id,
+    projectId,
+    stage,
+    dailyLogId: body.dailyLogId,
+    filename,
+    createdAt,
+    referenceId: doc.referenceId,
+    url: `/api/agents/compliance/pdf/${projectId}/${id}`,
+  })
+})
+
+agents.get('/compliance/pdf/:projectId', async (c) => {
+  const projectId = c.req.param('projectId')
+  const redis = getRedis()
+  if (!redis) return c.json({ projectId, pdfs: [] })
+  try {
+    const ids = await redis.lrange(keys.compliancePdfIndex(projectId), 0, 50)
+    const pdfs = []
+    for (const id of ids) {
+      const raw = await redis.get(keys.compliancePdf(projectId, id))
+      if (!raw) continue
+      const s = JSON.parse(raw) as StoredPdf
+      pdfs.push({
+        id: s.id,
+        projectId: s.projectId,
+        stage: s.stage,
+        dailyLogId: s.dailyLogId,
+        filename: s.filename,
+        createdAt: s.createdAt,
+        referenceId: s.referenceId,
+        url: `/api/agents/compliance/pdf/${projectId}/${s.id}`,
+      })
+    }
+    return c.json({ projectId, pdfs })
+  } catch (err) {
+    console.warn('[compliance-pdf] list failed:', (err as Error).message)
+    return c.json({ projectId, pdfs: [] })
+  }
+})
+
+agents.get('/compliance/pdf/:projectId/:id', async (c) => {
+  const projectId = c.req.param('projectId')
+  const id = c.req.param('id')
+  const redis = getRedis()
+  if (!redis) return c.json({ error: 'not found' }, 404)
+  const raw = await redis.get(keys.compliancePdf(projectId, id))
+  if (!raw) return c.json({ error: 'not found' }, 404)
+  const s = JSON.parse(raw) as StoredPdf
+  const bytes = Buffer.from(s.bytesB64, 'base64')
+  c.header('Content-Type', 'application/pdf')
+  c.header('Content-Disposition', `attachment; filename="${s.filename}"`)
+  return c.body(bytes)
 })
 
 api.route('/agents', agents)

@@ -105,6 +105,7 @@ export function AgentDock({
 
   return (
     <div className="agent-dock">
+      <p className="agent-dock__heading">Quick Solutions</p>
       <div className="agent-dock__bar">
         {AGENT_BUTTONS.map((b) => {
           const Icon = ICONS[b.key] ?? Box
