@@ -57,6 +57,11 @@ a {
   z-index: 50;
   padding: 0.65rem 1rem;
   pointer-events: none;
+  background: var(--bg-dark);
+}
+
+.nav-shell:has(.map-page-v2) {
+  opacity: 40;
 }
 .nav {
   pointer-events: auto;
@@ -81,6 +86,14 @@ a {
     0 0 0 1px rgba(34, 211, 238, 0.12),
     0 16px 48px -18px rgba(0, 0, 0, 0.6);
 }
+
+/* Map page runs a dark canvas — make the body (the strip behind the
+   transparent sticky nav) dark too, so no white bar shows on scroll. */
+body:has(.map-page-v2) {
+  background: var(--bg-dark);
+}
+
+
 .nav__brand {
   display: inline-flex;
   align-items: center;
