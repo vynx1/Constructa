@@ -60,6 +60,8 @@ export interface LandListing {
   images: string[]
   imageUnavailable?: boolean
   sources: { title: string; url: string }[]
+  confidence?: number
+  agent?: { name: string; handle: string; address: string }
 }
 
 export interface GuideFactor {
@@ -68,6 +70,9 @@ export interface GuideFactor {
   score: number
   reasoning: string
   sources: { title: string; url: string }[]
+  // Multistack provenance: which Agentverse specialist produced this factor.
+  confidence?: number
+  agent?: { name: string; handle: string; address: string }
 }
 
 export interface BuyRecommendation {
@@ -156,4 +161,3 @@ export const mapClient = {
   unlike: (id: string) =>
     fetch(`/api/map/liked/${id}`, { method: 'DELETE' }).then((r) => r.json()),
 }
-

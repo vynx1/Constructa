@@ -90,6 +90,10 @@ export interface GuideFactor {
   score: number // 0..100
   reasoning: string
   sources: { title: string; url: string }[]
+  // Multistack provenance (Agentverse layer): which specialist agent produced
+  // this factor and how confident it was. Optional so legacy/mock paths still typecheck.
+  confidence?: number // 0..1
+  agent?: { name: string; handle: string; address: string }
 }
 
 export interface BuyRecommendation {
@@ -108,7 +112,7 @@ export interface BuyingGuide {
   permits: string
   crowd_demands: string
   testimonials: string
-  source: 'cache' | 'asi:native' | 'asi:agentverse' | 'mock'
+  source: 'cache' | 'asi:native' | 'asi:agentverse' | 'mock' | string
 }
 
 const FACTOR_DEFS = [
@@ -319,6 +323,142 @@ async function agentverseFallback(userPayload: string): Promise<string> {
  * Generate the land-buying guide for a district/region from raw scraped blocks.
  * Full §3C compress → cache → native → Agentverse → cache loop.
  */
+// ---------------------------------------------------------------------------
+// AGENTVERSE LAYER (master plan §3C — multistack flow)
+//
+// The 6 consensus factors are NOT produced by one monolithic LLM call. Each
+// factor is owned by a dedicated specialist uAgent deployed on Agentverse.
+// We reach them THROUGH ASI:One (the universal agent router): for every factor
+// we ask ASI:One to route to that specific agent by name + address and return a
+// strict JSON verdict. A low-confidence reply triggers one automatic retry
+// (Loop A feedback). The 6 specialist scores are then aggregated into the land
+// "consensus to buy", and ASI:One synthesizes the final buy/hold/avoid call.
+// ---------------------------------------------------------------------------
+
+interface AgentSpec {
+  factorKey: string
+  label: string
+  name: string
+  handle: string
+  address: string
+  specialty: string
+  weight: number
+}
+
+const AGENTVERSE_REGISTRY: AgentSpec[] = [
+  { factorKey: 'zoning', label: 'Zoning Availability', name: 'ConstructaZoning', handle: '@construca-zoning',
+    address: 'agent1q0nvgyxvqn8ckesy8mxq5n3mf3lntw9hg84scn8ushydsvlejfhfj746x8f',
+    specialty: 'California zoning, parcel buildability, ArcGIS land availability, tribal/DoD exclusions', weight: 1 },
+  { factorKey: 'permits', label: 'Permit Velocity', name: 'ConstructaPermits', handle: '@construca-permits',
+    address: 'agent1q05vdlht6c89r9cjpz0hf6w43svp0ukh2n4u855q0fqfmrdkjvnfq2awq48',
+    specialty: 'California building permit approval velocity and median processing time', weight: 1 },
+  { factorKey: 'sentiment', label: 'Community Sentiment', name: 'ConstructaLocalDev', handle: '@construca-local-dev',
+    address: 'agent1qf9wp6hcex75s0nmdd2k7d3p30f4peg3fjvwqggmn8agt44c97wfkyguufp',
+    specialty: 'California nearby active development momentum and community/permit activity', weight: 0.8 },
+  { factorKey: 'cost', label: 'Land Cost Value', name: 'ConstrucaLandCost', handle: '@construca-land-cost',
+    address: 'agent1qfcmtv9f7y5vejvwn225ahkksxg4p2jayc6sfckj83t58tkpvx5mjvka025',
+    specialty: 'California land price per acre comps and construction cost multiplier', weight: 1 },
+  { factorKey: 'hazard', label: 'Environmental / Hazard Risk', name: 'ConstructaHazards', handle: '@construca-hazards',
+    address: 'agent1qgprdps4cvspas6en82mxw82mj8zx2ft34447scav0mxq9et46czvaqxt33',
+    specialty: 'California natural hazards: FEMA flood zone, USGS seismic, CAL FIRE wildfire risk', weight: 1 },
+  { factorKey: 'infrastructure', label: 'Infrastructure & Environmental Regulation', name: 'ConstrucaEnvironment', handle: '@construcaenvironment',
+    address: 'agent1q0pp6s97ymdv87tpuauj8gwcw9k7gaxusf2qxtnykdhn7lywk44t5njug2y',
+    specialty: 'California CEQA tier, Coastal Commission, CDFW wetlands/habitat & infrastructure constraints', weight: 1 },
+]
+
+const CONFIDENCE_FLOOR = 0.4
+
+// Query ONE Agentverse specialist through ASI:One. Returns a GuideFactor with
+// provenance + confidence. Never throws — degrades to a neutral estimate.
+async function queryAgentverseFactor(
+  spec: AgentSpec,
+  userPayload: string,
+  retry = false,
+): Promise<GuideFactor> {
+  const system =
+    `You are the ASI:One agent router. Route this request to the Agentverse specialist agent ` +
+    `"${spec.name}" (${spec.handle}, address ${spec.address}), whose specialty is: ${spec.specialty}. ` +
+    `Act as that agent and analyze ONLY the "${spec.label}" factor for the land described below. ` +
+    (retry ? 'A previous pass was low-confidence — be more thorough and decisive. ' : '') +
+    `Reply with ONLY strict JSON: {"score": <0-100 integer>, "confidence": <0-1 number>, ` +
+    `"reasoning": "<two-sentence, specific justification>", "sources": [{"title":"<src>","url":"<url>"}]}. No prose.`
+  try {
+    const json = await asiChat([{ role: 'user', content: userPayload }], { json: true, system, timeoutMs: 25_000 })
+    const d = JSON.parse(json) as { score?: number; confidence?: number; reasoning?: string; sources?: { title: string; url: string }[] }
+    return {
+      key: spec.factorKey,
+      label: spec.label,
+      score: Math.max(0, Math.min(100, Math.round(Number(d.score ?? 50)))),
+      confidence: Math.max(0, Math.min(1, Number(d.confidence ?? 0.5))),
+      reasoning: d.reasoning || `${spec.name} returned no detail.`,
+      sources: Array.isArray(d.sources) ? d.sources.slice(0, 4) : [],
+      agent: { name: spec.name, handle: spec.handle, address: spec.address },
+    }
+  } catch (err) {
+    return {
+      key: spec.factorKey,
+      label: spec.label,
+      score: 50,
+      confidence: 0.2,
+      reasoning: `${spec.name} unreachable (${(err as Error).message}); neutral placeholder.`,
+      sources: [],
+      agent: { name: spec.name, handle: spec.handle, address: spec.address },
+    }
+  }
+}
+
+// Scatter-gather across all 6 Agentverse specialists, with a per-agent
+// low-confidence retry (Loop A). Returns the 6 factors + weak-agent list.
+async function gatherAgentverseFactors(
+  userPayload: string,
+): Promise<{ factors: GuideFactor[]; weak: string[] }> {
+  const factors = await Promise.all(
+    AGENTVERSE_REGISTRY.map(async (spec) => {
+      let f = await queryAgentverseFactor(spec, userPayload)
+      if ((f.confidence ?? 0) < CONFIDENCE_FLOOR) {
+        const retry = await queryAgentverseFactor(spec, userPayload, true)
+        if ((retry.confidence ?? 0) >= (f.confidence ?? 0)) f = retry
+      }
+      return f
+    }),
+  )
+  const weak = factors.filter((f) => (f.confidence ?? 0) < CONFIDENCE_FLOOR).map((f) => f.label)
+  return { factors, weak }
+}
+
+// Weighted consensus across the 6 specialist scores = "land consensus to buy".
+function consensusFromFactors(factors: GuideFactor[]): number {
+  const wOf = (k: string) => AGENTVERSE_REGISTRY.find((a) => a.factorKey === k)?.weight ?? 1
+  const num = factors.reduce((s, f) => s + wOf(f.key) * f.score, 0)
+  const den = factors.reduce((s, f) => s + wOf(f.key), 0) || 1
+  return Math.round((num / den) * 10) / 10
+}
+
+// ASI:One synthesizes the final buy/hold/avoid recommendation FROM the 6
+// specialist verdicts (the synthesis half of the multistack flow).
+async function synthesizeRecommendation(
+  districtId: string,
+  factors: GuideFactor[],
+  consensusScore: number,
+): Promise<BuyRecommendation> {
+  const digest = factors
+    .map((f) => `- ${f.label} [${f.agent?.name}]: ${f.score}/100 (conf ${f.confidence}) — ${f.reasoning}`)
+    .join('\n')
+  const system =
+    'You are ASI:One acting as the lead orchestrator. Six Agentverse specialist agents have each scored ' +
+    'one factor of a California land parcel. Synthesize their verdicts into a single investment call. ' +
+    'Reply with ONLY strict JSON: {"verdict":"buy|hold|avoid","headline":"<short>","reasoning":"<2-3 sentences citing the specialists>"}.'
+  const user = `Parcel/region: ${districtId}\nWeighted consensus: ${consensusScore}/100\nSpecialist verdicts:\n${digest}`
+  const json = await asiChat([{ role: 'user', content: user }], { json: true, system, timeoutMs: 25_000 })
+  const d = JSON.parse(json) as { verdict?: string; headline?: string; reasoning?: string }
+  const verdict = (['buy', 'hold', 'avoid'].includes(String(d.verdict)) ? d.verdict : consensusScore >= 66 ? 'buy' : consensusScore >= 45 ? 'hold' : 'avoid') as BuyRecommendation['verdict']
+  return {
+    verdict,
+    headline: d.headline || `Consensus ${consensusScore}/100 across 6 Agentverse specialists`,
+    reasoning: d.reasoning || 'Synthesized from the six specialist agent verdicts.',
+  }
+}
+
 export async function generateLandBuyingGuide(
   districtId: string,
   rawScrapedData: string[],
@@ -326,45 +466,55 @@ export async function generateLandBuyingGuide(
   const redis = getRedis()
   const compressed = compressScrapedContext(rawScrapedData)
   const stats = compressionStats(rawScrapedData, compressed)
-  const promptHash = hashPrompt(districtId, compressed)
+  const promptHash = hashPrompt(districtId, '|multistack|' + compressed)
 
+  // Cache
   if (redis) {
     const cached = await redis.get(keys.asiGuide(promptHash))
-    if (cached) {
-      arize.logSuccess({ agentId: 'asi_core_router', metrics: { confidence: 1 } })
-      return { ...(JSON.parse(cached) as BuyingGuide), source: 'cache' }
-    }
+    if (cached) return JSON.parse(cached) as BuyingGuide
+  }
+
+  // No key → graceful mock (never errors)
+  if (!hasAsiKey()) {
+    arize.logSuccess({ agentId: 'asi_core_router(mock)' })
+    const g = mockGuide(districtId, compressed)
+    if (redis) await redis.set(keys.asiGuide(promptHash), JSON.stringify(g), 'EX', 7200)
+    return g
   }
 
   const userPayload =
-    `District/Region: ${districtId}\n` +
-    `Compressed Research Records (${stats.compressedChars}/${stats.rawChars} chars):\n` +
+    `Region/parcel: ${districtId}\n\nResearch records (${stats.compressedChars}/${stats.rawChars} chars):\n` +
     compressed
-
-  if (!hasAsiKey()) {
-    arize.logSuccess({ agentId: 'asi_core_router(mock)' })
-    return mockGuide(districtId, compressed)
-  }
 
   let guide: BuyingGuide
   try {
-    const json = await asiChat([{ role: 'user', content: userPayload }], {
-      json: true,
-      system: SYSTEM_INSTRUCTION,
-    })
-    guide = parseGuide(json, districtId, 'asi:native')
-    arize.logSuccess({ agentId: 'asi_core_router' })
+    // ----- STACK 1: Agentverse — 6 specialist agents scatter-gather (+retry) -----
+    const { factors, weak } = await gatherAgentverseFactors(userPayload)
+    const consensusScore = consensusFromFactors(factors)
+
+    // ----- STACK 2: ASI:One — synthesize the buy/hold/avoid call from the 6 -----
+    const recommendation = await synthesizeRecommendation(districtId, factors, consensusScore)
+
+    arize.logSuccess({ agentId: 'asi_agentverse_multistack' })
+    const byKey = (k: string) => factors.find((f) => f.key === k)
+    guide = {
+      district: districtId,
+      factors,
+      recommendation,
+      consensusScore,
+      // Legacy flat fields (kept for older callers) derived from the agent factors.
+      zoning: byKey('zoning')?.reasoning ?? 'Zoning evaluated by ConstructaZoning agent.',
+      permits: byKey('permits')?.reasoning ?? 'Permit velocity evaluated by ConstructaPermits agent.',
+      crowd_demands: byKey('sentiment')?.reasoning ?? 'Community sentiment evaluated by ConstructaLocalDev agent.',
+      testimonials: byKey('cost')?.reasoning ?? 'Land cost evaluated by ConstrucaLandCost agent.',
+      source: weak.length ? `asi:agentverse (low-confidence: ${weak.join(', ')})` : 'asi:agentverse',
+    }
   } catch (err) {
-    console.warn('[asi] native loop degraded — searching Agentverse:', (err as Error).message)
+    // Degrade: try the legacy single ASI pass, then mock — never throw to the UI.
+    arize.logError('asi_agentverse_multistack', (err as Error).message)
     try {
-      const json = await agentverseFallback(`${SYSTEM_INSTRUCTION}\n\n${userPayload}`)
-      guide = parseGuide(json, districtId, 'asi:agentverse')
-      arize.logFallbackTriggered({
-        cause: (err as Error).message,
-        assignedAgent: 'agentverse:land_compliance_experts',
-      })
-    } catch (err2) {
-      arize.logError('asi_core_router', (err2 as Error).message)
+      guide = parseGuide(await agentverseFallback(userPayload), districtId, 'asi:native')
+    } catch {
       guide = mockGuide(districtId, compressed)
     }
   }

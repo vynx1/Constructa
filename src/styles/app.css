@@ -2774,3 +2774,79 @@ a {
   display: grid;
   gap: 1rem;
 }
+
+/* --- Map factor scale: Agentverse provenance (multistack flow) ----------- */
+.factor-scale__legend {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.4rem;
+  margin-bottom: 0.7rem;
+  font-size: 0.66rem;
+  line-height: 1.4;
+  color: var(--ink-soft-dark);
+}
+.factor-scale__legend svg { flex-shrink: 0; margin-top: 1px; color: var(--glow-cyan); }
+
+.factor-row__agent {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-top: 0.35rem;
+  font-size: 0.62rem;
+  color: var(--ink-soft-dark);
+}
+.factor-row__agent svg { color: var(--glow-cyan); }
+.factor-row__agent-name {
+  font-family: var(--font-mono);
+  letter-spacing: 0.02em;
+  color: var(--ink-dark);
+}
+.factor-row__conf,
+.factor-modal__conf {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  margin-left: auto;
+  padding: 0.05rem 0.4rem;
+  border-radius: 999px;
+  font-size: 0.58rem;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  border: 1px solid transparent;
+}
+.conf--high { color: #34d399; background: rgba(52, 211, 153, 0.12); border-color: rgba(52, 211, 153, 0.3); }
+.conf--med  { color: var(--accent-warm); background: rgba(245, 158, 11, 0.12); border-color: rgba(245, 158, 11, 0.3); }
+.conf--low  { color: var(--accent); background: rgba(200, 85, 61, 0.14); border-color: rgba(200, 85, 61, 0.35); }
+.conf--unknown { color: var(--ink-soft-dark); background: rgba(255,255,255,0.05); }
+
+/* In-depth modal: agent linkage block */
+.factor-modal__agent {
+  margin: 0.85rem 0 0.5rem;
+  padding: 0.75rem 0.85rem;
+  border-radius: 10px;
+  background: rgba(34, 211, 238, 0.06);
+  border: 1px solid rgba(34, 211, 238, 0.18);
+}
+.factor-modal__agent-head {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-size: 0.78rem;
+  color: var(--ink-dark);
+}
+.factor-modal__agent-head > svg { color: var(--glow-cyan); flex-shrink: 0; }
+.factor-modal__agent-head .factor-modal__conf { margin-left: auto; }
+.factor-modal__agent-addr {
+  display: block;
+  margin: 0.4rem 0 0.55rem;
+  font-family: var(--font-mono);
+  font-size: 0.62rem;
+  color: var(--glow-cyan);
+  word-break: break-all;
+}
+.factor-modal__agent-flow {
+  margin: 0;
+  font-size: 0.72rem;
+  line-height: 1.5;
+  color: var(--ink-soft-dark);
+}
