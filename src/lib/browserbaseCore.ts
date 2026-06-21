@@ -34,7 +34,21 @@ export async function withBrowserbasePage<T>(
     }
   }
 
-  const session = await bb.sessions.create(sessionPayload as any)
+    // advancedStealth + solveCaptchas require Browserbase's Enterprise "Verified
+  // mode". On non-Enterprise plans that 403s, so degrade gracefully to basic
+  // stealth + proxies (still enough for the listing-image scrape).
+  let session
+  try {
+    session = await bb.sessions.create(sessionPayload as any)
+  } catch (err) {
+    const msg = (err as Error)?.message ?? ''
+    if (sessionPayload.browserSettings && /Enterprise plan|Verified mode/i.test(msg)) {
+      delete sessionPayload.browserSettings
+      session = await bb.sessions.create(sessionPayload as any)
+    } else {
+      throw err
+    }
+  }
   const browser = await chromium.connectOverCDP(session.connectUrl)
   try {
     const ctx = browser.contexts()[0]

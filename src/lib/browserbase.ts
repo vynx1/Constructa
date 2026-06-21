@@ -14,7 +14,7 @@ import {
   regionContextFor,
   type RawListingCard,
 } from '~/lib/imageScraper'
-import { resolveRegion, stateCodeFromRegionId } from '~/lib/regionContext'
+import { resolveRegion, stateCodeFromRegionId, nearbyRegionIds } from '~/lib/regionContext'
 
 export interface ScrapeResult {
   district: string
@@ -137,37 +137,76 @@ function cardToListing(
   }
 }
 
-async function liveScrapeLandListings(regionId: string): Promise<LandListing[]> {
-  const { region, zips, state, city } = regionContextFor(regionId)
+// Scrape + hydrate listings for ONE region using the EXACT same Browserbase
+// image methodology (currentSrc from marketplace CDNs -> provenance/vision
+// gate -> DDG ZIP fallback). `retagRegionId` lets borrowed nearby-region
+// listings be attributed to the originally requested congressional district.
+async function scrapeRegionListings(
+  page: any,
+  sourceRegionId: string,
+  retagRegionId: string,
+): Promise<LandListing[]> {
+  const { region, zips, city } = regionContextFor(sourceRegionId)
   const primaryZip = zips[0]!
+  const raw = await scrapeRawListingCards(page, region, zips)
+  const listings: LandListing[] = []
+  const seen = new Set<string>()
+
+  for (let i = 0; i < raw.length && listings.length < 8; i++) {
+    const card = raw[i]!
+    const zipForFallback = card.text.match(/\b(\d{5})\b/)?.[1] ?? primaryZip
+    const imagePack = await hydrateCardImages(page, card, zipForFallback, city)
+    const listing = cardToListing(
+      card,
+      retagRegionId,
+      listings.length,
+      region,
+      primaryZip,
+      imagePack,
+    )
+    if (!listing) continue
+    const key = `${listing.price}|${listing.zip}|${listing.acreage}`
+    if (seen.has(key)) continue
+    seen.add(key)
+    listings.push(listing)
+  }
+  return listings
+}
+
+async function liveScrapeLandListings(regionId: string): Promise<LandListing[]> {
+  const { state } = regionContextFor(regionId)
 
   return withBrowserbasePage(
     async (page) => {
-      const raw = await scrapeRawListingCards(page, region, zips)
-      const listings: LandListing[] = []
-      const seen = new Set<string>()
+      // 1) Try the requested congressional district first.
+      const primary = await scrapeRegionListings(page, regionId, regionId)
+      if (primary.length) return primary
 
-      for (let i = 0; i < raw.length && listings.length < 8; i++) {
-        const card = raw[i]!
-        const zipForFallback = card.text.match(/\b(\d{5})\b/)?.[1] ?? primaryZip
-        const imagePack = await hydrateCardImages(page, card, zipForFallback, city)
-        const listing = cardToListing(
-          card,
-          regionId,
-          listings.length,
-          region,
-          primaryZip,
-          imagePack,
+      // 2) No specific properties in this district -> borrow imagery from the
+      //    nearest sibling districts, reusing the identical scrape + hydrate +
+      //    verify pipeline. Re-tagged to the requested district, with a source
+      //    note so provenance stays honest. Only listings with real verified
+      //    images are accepted.
+      for (const nb of nearbyRegionIds(regionId, 4)) {
+        const borrowed = await scrapeRegionListings(page, nb, regionId)
+        const withImages = borrowed.filter(
+          (l) => !l.imageUnavailable && l.images.length > 0,
         )
-        if (!listing) continue
-        const key = `${listing.price}|${listing.zip}|${listing.acreage}`
-        if (seen.has(key)) continue
-        seen.add(key)
-        listings.push(listing)
+        if (withImages.length) {
+          console.warn(
+            `[browserbase] ${regionId} has no live listings; borrowed imagery from nearby ${nb}`,
+          )
+          return withImages.map((l) => ({
+            ...l,
+            sources: [
+              ...l.sources,
+              { title: `Representative imagery from nearby district ${nb}`, url: '' },
+            ],
+          }))
+        }
       }
 
-      if (!listings.length) throw new Error('no listings parsed from any source')
-      return listings
+      throw new Error('no listings parsed from district or nearby regions')
     },
     { state, advancedStealth: true },
   )
