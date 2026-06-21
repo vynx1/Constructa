@@ -1,3 +1,5 @@
+﻿import { readFileSync, existsSync } from 'node:fs'
+import { join } from 'node:path'
 import { Hono } from 'hono'
 import { getRedis, keys } from '~/lib/redis'
 import { complete } from '~/lib/claude'
@@ -36,6 +38,26 @@ import { generateLandBuyingGuide, seededGuide } from '~/lib/asi'
 
 const AGENT_SERVICE_URL = () =>
   process.env.AGENT_SERVICE_URL ?? 'http://localhost:8000'
+
+// ---------------------------------------------------------------------------
+// Seed-file fallback: lazily loaded once and cached in memory so that a Redis
+// miss for any region still serves real contractor data.
+// ---------------------------------------------------------------------------
+let _seedCache: Record<string, BusinessPartner[]> | null = null
+function getSeedPartners(regionId: string): BusinessPartner[] | null {
+  if (!_seedCache) {
+    const p = join(process.cwd(), 'data', 'partners.seed.json')
+    if (!existsSync(p)) return null
+    try {
+      _seedCache = JSON.parse(readFileSync(p, 'utf8')) as Record<string, BusinessPartner[]>
+    } catch {
+      return null
+    }
+  }
+  const key = `map:region:${regionId}:partners`
+  const partners = _seedCache[key]
+  return Array.isArray(partners) && partners.length > 0 ? partners : null
+}
 
 export const api = new Hono().basePath('/api')
 
@@ -346,6 +368,140 @@ map.get('/datacenter', (c) =>
     compliance: ['CEQA', 'Generator air permits', 'Cooling noise ordinances'],
   }),
 )
+
+// --- Local Partners: BrowserBase contractor/business + reviews scrape --------
+// Cursor-paginated (page size 8). `x-live-mode: true` runs the live BrowserBase
+// scrape (one session, all trades), caches the full list in Redis (2h), then
+// serves pages from cache. Default/non-live and any failure serve mock so the
+// vertical infinite-scroll list always renders.
+map.get('/region/:regionId/partners', async (c) => {
+  const regionId = c.req.param('regionId')
+  const cursor = Math.max(0, parseInt(c.req.query('cursor') ?? '0', 10) || 0)
+  const pageSize = 8
+  const DISTRICT_BATCH = 8 // partners "claimed" per district
+  const WINDOW_SIZE = 5 // rotate: no repeat until 5 different districts later
+  const liveMode = c.req.header('x-live-mode') === 'true'
+  const refresh =
+    c.req.query('refresh') === 'true' || c.req.header('x-refresh') === 'true'
+  const redis = getRedis()
+
+  // Stable identity for a partner across districts: normalized name + host.
+  const normKey = (p: BusinessPartner) =>
+    `${(p.name || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()}|${(
+      p.sourceSite || ''
+    ).toLowerCase()}`
+
+  // --- Rotation window state (Redis-backed, in-memory fallback) -------------
+  const readWindow = async (): Promise<PartnerWindowEntry[]> => {
+    if (redis) {
+      try {
+        const raw = await redis.get(keys.partnersWindow())
+        if (raw) return JSON.parse(raw) as PartnerWindowEntry[]
+      } catch (err) {
+        console.warn('[partners] window read failed:', err)
+      }
+    }
+    return partnersWindowMem
+  }
+  const writeWindow = async (w: PartnerWindowEntry[]): Promise<void> => {
+    partnersWindowMem = w
+    if (redis) {
+      try {
+        await redis.set(keys.partnersWindow(), JSON.stringify(w), 'EX', 86400)
+      } catch (err) {
+        console.warn('[partners] window write failed:', err)
+      }
+    }
+  }
+
+  const cacheKey = keys.regionPartners(regionId)
+
+  // --- 1. Resolve the full source list for this district -------------------
+  let all: BusinessPartner[] | null = null
+  let live = false
+
+  if (!refresh && redis) {
+    try {
+      const cached = await redis.get(cacheKey)
+      if (cached) {
+        const parsed = JSON.parse(cached) as BusinessPartner[]
+        if (Array.isArray(parsed) && parsed.length) {
+          all = parsed
+          live = true
+        }
+      }
+    } catch (err) {
+      console.warn('[partners] cache read failed:', err)
+    }
+  }
+
+  // --- 1b. Seed-file fallback (Redis miss / Redis unavailable) ---------------
+  if (!all) {
+    const seeded = getSeedPartners(regionId)
+    if (seeded) {
+      all = seeded
+      live = true
+      // Re-populate Redis so subsequent requests hit cache.
+      if (redis) {
+        redis.set(cacheKey, JSON.stringify(seeded), 'EX', 86400).catch(() => {})
+      }
+    }
+  }
+
+  if (!all) {
+    if (!liveMode) {
+      all = mockPartners(regionId)
+      live = false
+    } else {
+      try {
+        const res = await scrapeLocalPartners(regionId)
+        if (res.live && res.partners.length) {
+          all = res.partners
+          live = true
+          try {
+            if (redis) await redis.set(cacheKey, JSON.stringify(all), 'EX', 7200)
+          } catch (err) {
+            console.warn('[partners] cache write failed:', err)
+          }
+        } else {
+          all = res.partners.length ? res.partners : mockPartners(regionId)
+          live = false
+        }
+      } catch (err) {
+        console.error('[partners] live failed, serving mock:', err)
+        all = mockPartners(regionId)
+        live = false
+      }
+    }
+  }
+
+  // --- 2. Apply the 5-district rotation window -----------------------------
+  const windowState = await readWindow()
+  const blocked = new Set<string>()
+  for (const entry of windowState) {
+    if (entry.regionId !== regionId) for (const k of entry.keys) blocked.add(k)
+  }
+  let rotated = all.filter((p) => !blocked.has(normKey(p)))
+  // Never return an empty list — if everything is blocked, fall back to the
+  // full set (the pool is smaller than 5 districts' worth of partners).
+  if (rotated.length === 0) rotated = all
+
+  const districtBatch = rotated.slice(0, DISTRICT_BATCH)
+
+  // --- 3. Record this district into the rotation window (first page only) ---
+  if (cursor === 0) {
+    const nextWindow: PartnerWindowEntry[] = [
+      { regionId, keys: districtBatch.map(normKey) },
+      ...windowState.filter((e) => e.regionId !== regionId),
+    ].slice(0, WINDOW_SIZE)
+    await writeWindow(nextWindow)
+  }
+
+  // --- 4. Paginate within this district's batch ----------------------------
+  const slice = districtBatch.slice(cursor, cursor + pageSize)
+  const nextCursor = cursor + pageSize < districtBatch.length ? cursor + pageSize : null
+  return c.json({ partners: slice, nextCursor, total: districtBatch.length, live })
+})
 
 api.route('/map', map)
 
