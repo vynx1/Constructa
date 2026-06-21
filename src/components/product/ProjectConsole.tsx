@@ -65,21 +65,22 @@ export function ProjectConsole({ districtLabel, phase, onGenerate }: Props) {
         )}
       </div>
 
-      <button
-        className="btn btn--primary project-console__cta"
-        onClick={() => idea.trim() && onGenerate(idea.trim())}
-        disabled={busy || !idea.trim()}
-      >
-        {busy ? (
-          <>
-            <Loader2 size={16} className="spin" /> Generating…
-          </>
-        ) : (
-          <>
-            <Hammer size={16} /> Generate 3D model & plan
-          </>
-        )}
-      </button>
+    <button
+      className="btn btn--primary project-console__cta flex items-center justify-center gap-2"
+      onClick={() => idea.trim() && onGenerate(idea.trim())}
+      disabled={busy || !idea.trim()}
+    >
+      {busy ? (
+        <>
+          <Loader2 size={16} className="spin" /> Generating…
+        </>
+      ) : (
+        <>
+          {/* <Hammer size={16} />  */}
+          Generate 3D model & plan
+        </>
+      )}
+    </button>
 
       {busy && (
         <ul className="project-console__progress">
