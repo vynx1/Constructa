@@ -56,7 +56,7 @@ function Scene() {
     <>
       <PerspectiveCamera makeDefault position={[10, 6, 12]} fov={40} />
       {/* Soft fog blends the far edges of the district into the page. */}
-      <fog attach="fog" args={['#f3f0ea', 16, 34]} />
+      <fog attach="fog" args={['#0b0f14', 14, 34]} />
       <ambientLight intensity={0.6} />
       <directionalLight
         position={[8, 12, 6]}
@@ -75,11 +75,11 @@ function Scene() {
         receiveShadow
       >
         <planeGeometry args={[40, 40]} />
-        <meshStandardMaterial color="#e9e6e0" />
+        <meshStandardMaterial color="#1a2332" />
       </mesh>
       <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0, 0]}>
         <planeGeometry args={[40, 40, 40, 40]} />
-        <meshBasicMaterial color="#d3ccbf" wireframe transparent opacity={0.45} />
+        <meshBasicMaterial color="#243044" wireframe transparent opacity={0.35} />
       </mesh>
 
       {/* Always auto-rotates, and stays draggable at any time — grabbing it

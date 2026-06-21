@@ -26,7 +26,13 @@ export const Route = createRootRouteWithContext<RouterContext>()({
           'AI construction foreman and land-intelligence platform for heavily regulated states.',
       },
     ],
-    links: [{ rel: 'stylesheet', href: appCss }],
+    links: [
+      { rel: 'stylesheet', href: appCss },
+      {
+        rel: 'stylesheet',
+        href: 'https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap',
+      },
+    ],
   }),
   component: RootComponent,
 })
