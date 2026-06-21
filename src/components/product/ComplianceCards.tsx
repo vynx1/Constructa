@@ -3,7 +3,7 @@
 // the most critical compliance items per stage. Cards render in a dark glassmorphic
 // grid that matches the home-page aesthetic.
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import type { ExecutionPlan, PlanStage } from '~/lib/planTypes'
 
 interface StageCard {
@@ -52,7 +52,11 @@ export function ComplianceCards({
   onSelectStage,
 }: ComplianceCardsProps) {
   const [cards, setCards] = useState<StageCard[]>([])
-  const [expanded, setExpanded] = useState<string | null>(null)
+  // Track the open ROW (not a single card) so opening one card expands every
+  // card sharing its row — no more lopsided empty gaps next to the open one.
+  const [openRow, setOpenRow] = useState<number | null>(null)
+  const gridRef = useRef<HTMLDivElement>(null)
+  const [cols, setCols] = useState(1)
 
   const build = useCallback(() => {
     if (plan) setCards(deriveCards(plan))
@@ -61,6 +65,22 @@ export function ComplianceCards({
   useEffect(() => {
     build()
   }, [build])
+
+  // Derive the live column count from the resolved grid tracks so row grouping
+  // stays correct across breakpoints (3 → 2 → 1 columns).
+  useEffect(() => {
+    const grid = gridRef.current
+    if (!grid) return
+    const measure = () => {
+      const tracks = getComputedStyle(grid).gridTemplateColumns
+      const n = tracks && tracks !== 'none' ? tracks.split(' ').length : 1
+      setCols((prev) => (prev !== n ? n : prev))
+    }
+    measure()
+    const ro = new ResizeObserver(measure)
+    ro.observe(grid)
+    return () => ro.disconnect()
+  }, [cards.length])
 
   if (!cards.length) return null
 
@@ -75,22 +95,25 @@ export function ComplianceCards({
         </p>
       </header>
 
-      <div className="compliance-cards__grid">
-        {cards.map(({ stage, laws, summary, risk }) => {
+      <div className="compliance-cards__grid" ref={gridRef}>
+        {cards.map(({ stage, laws, summary, risk }, index) => {
           const isActive = stage.key === activeStage
-          const isOpen = expanded === stage.key
+          const row = Math.floor(index / cols)
+          const isOpen = openRow === row
 
           return (
             <article
               key={stage.key}
-              className={`compliance-card ${isActive ? 'compliance-card--active' : ''}`}
+              className={`compliance-card ${isActive ? 'compliance-card--active' : ''}${
+                isOpen ? ' compliance-card--open' : ''
+              }`}
               aria-expanded={isOpen}
             >
               <button
                 className="compliance-card__top"
                 onClick={() => {
                   onSelectStage(stage.key)
-                  setExpanded(isOpen ? null : stage.key)
+                  setOpenRow(isOpen ? null : row)
                 }}
                 aria-label={`${stage.title} — ${RISK_LABEL[risk]}`}
               >

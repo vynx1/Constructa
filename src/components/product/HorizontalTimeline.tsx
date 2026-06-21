@@ -146,7 +146,9 @@ export function HorizontalTimeline({
                   width: `${widthPct}%`,
                   background: palette.bg,
                   borderColor: palette.border,
-                  boxShadow: isActive ? `0 0 0 2px ${palette.border}` : undefined,
+                  // Expose the stage hue to CSS (currentColor) so the entrance,
+                  // hover lift and active glow can all tint themselves.
+                  color: palette.border,
                 }}
                 onClick={() => onSelectStage(stage.key)}
                 role="listitem"

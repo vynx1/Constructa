@@ -112,6 +112,74 @@ export function buildingHeight(floors: number): number {
   return SLAB + floors * FLOOR_HEIGHT + 0.6
 }
 
+// If the idea already describes its own grounds we leave the site to the model;
+// otherwise we drop in a pre-made context set (roads, sidewalks, trees, a small
+// park, lamp posts) so a bare prompt still renders as a real site, not a box.
+const LANDSCAPE_KEYWORDS =
+  /landscap|garden|courtyard|plaza|greenery|\btrees?\b|\bpark\b|lawn|grounds|streetscape/i
+
+export function wantsAutoLandscape(idea: string): boolean {
+  return !LANDSCAPE_KEYWORDS.test(idea || '')
+}
+
+// Material families that mark a group as "site" (so we don't double-add and so
+// the viewer keeps them when the solid massing is stripped).
+const SITE_MATERIALS = ['asphalt', 'paving', 'trunk', 'foliage', 'grass', 'lamp']
+function hasSiteGroups(groups: ModelGroup[]): boolean {
+  return groups.some(
+    (g) => SITE_MATERIALS.includes(g.material) || g.name.startsWith('tree_') || g.name.startsWith('road_'),
+  )
+}
+
+/**
+ * Pre-made landscape/context set sized to the building footprint. Uses only Box
+ * + Cylinder primitives (cones = cylinder with radiusTop 0), every group named
+ * uniquely so React keys + getObjectByName stay clean.
+ */
+export function siteLandscape(width: number, depth: number): ModelGroup[] {
+  const g: ModelGroup[] = []
+  const hx = width / 2
+  const hz = depth / 2
+  const ROAD_W = 7
+
+  // Perimeter roads (front along X, side along Z) + lane dashes.
+  g.push({ name: 'road_front', type: 'BoxGeometry', args: [width + 70, 0.06, ROAD_W], position: [0, 0.03, hz + 15], material: 'asphalt' })
+  g.push({ name: 'road_side', type: 'BoxGeometry', args: [ROAD_W, 0.06, depth + 70], position: [hx + 15, 0.03, 0], material: 'asphalt' })
+  for (let i = -2; i <= 2; i++) {
+    g.push({ name: `road_dash_${i + 2}`, type: 'BoxGeometry', args: [3, 0.07, 0.4], position: [i * 9, 0.05, hz + 15], material: 'paving' })
+  }
+
+  // Sidewalks between building and roads.
+  g.push({ name: 'sidewalk_front', type: 'BoxGeometry', args: [width + 34, 0.08, 3.5], position: [0, 0.04, hz + 9], material: 'paving' })
+  g.push({ name: 'sidewalk_side', type: 'BoxGeometry', args: [3.5, 0.08, depth + 34], position: [hx + 9, 0.04, 0], material: 'paving' })
+
+  // A small park (lawn patch) tucked off the back-left corner.
+  g.push({ name: 'park_lawn', type: 'BoxGeometry', args: [22, 0.1, 18], position: [-(hx + 19), 0.05, -(hz + 5)], material: 'grass' })
+
+  const tree = (id: string, x: number, z: number, s = 1) => {
+    const trunkH = 2.4 * s
+    const canopyH = 4.4 * s
+    g.push({ name: `tree_trunk_${id}`, type: 'CylinderGeometry', args: [0.32 * s, 0.42 * s, trunkH, 6], position: [x, trunkH / 2, z], material: 'trunk' })
+    g.push({ name: `tree_canopy_${id}`, type: 'CylinderGeometry', args: [0, 2.3 * s, canopyH, 8], position: [x, trunkH + canopyH / 2 - 0.4, z], material: 'foliage' })
+  }
+  // Street trees along the front + side, then a cluster in the park.
+  for (let i = -2; i <= 2; i++) tree(`f${i + 2}`, i * 8, hz + 5.5, 1)
+  for (let i = -1; i <= 1; i++) tree(`s${i + 1}`, hx + 5.5, i * 9, 1)
+  tree('p1', -(hx + 15), -(hz + 2), 1.15)
+  tree('p2', -(hx + 23), -(hz + 9), 0.9)
+  tree('p3', -(hx + 24), -(hz + 1), 1)
+
+  const lamp = (id: string, x: number, z: number) => {
+    g.push({ name: `lamp_pole_${id}`, type: 'CylinderGeometry', args: [0.16, 0.2, 5, 6], position: [x, 2.5, z], material: 'lamp' })
+    g.push({ name: `lamp_head_${id}`, type: 'BoxGeometry', args: [1.4, 0.3, 0.5], position: [x, 4.95, z], material: 'lamp' })
+  }
+  lamp('1', -(hx + 2), hz + 9)
+  lamp('2', hx + 2, hz + 9)
+  lamp('3', hx + 9, -(hz + 4))
+
+  return g
+}
+
 /**
  * Build a complete, valid scene graph from an idea string using only the
  * constrained primitive library. Always produces every required group so the
@@ -122,12 +190,18 @@ export function buildingHeight(floors: number): number {
 export function scaffoldRegistry(idea: string): SceneGraph {
   const { buildingType, floors, width, depth } = parseIdea(idea)
 
-  if (buildingType === 'parking structure') return scaffoldParking(buildingType, floors, width, depth)
-  if (buildingType === 'luxury penthouse tower') return scaffoldPenthouse(buildingType, floors, width, depth)
-  if (buildingType === 'school campus') return scaffoldSchool(buildingType, floors, width, depth)
-  if (buildingType === 'single-family home') return scaffoldHome(buildingType, floors, width, depth)
-  if (buildingType === 'warehouse') return scaffoldWarehouse(buildingType, floors, width, depth)
-  return scaffoldGeneric(buildingType, floors, width, depth)
+  let scene: SceneGraph
+  if (buildingType === 'parking structure') scene = scaffoldParking(buildingType, floors, width, depth)
+  else if (buildingType === 'luxury penthouse tower') scene = scaffoldPenthouse(buildingType, floors, width, depth)
+  else if (buildingType === 'school campus') scene = scaffoldSchool(buildingType, floors, width, depth)
+  else if (buildingType === 'single-family home') scene = scaffoldHome(buildingType, floors, width, depth)
+  else if (buildingType === 'warehouse') scene = scaffoldWarehouse(buildingType, floors, width, depth)
+  else scene = scaffoldGeneric(buildingType, floors, width, depth)
+
+  if (wantsAutoLandscape(idea) && !hasSiteGroups(scene.groups)) {
+    scene.groups.push(...siteLandscape(width, depth))
+  }
+  return scene
 }
 
 function scaffoldGeneric(buildingType: string, floors: number, width: number, depth: number): SceneGraph {
@@ -324,6 +398,20 @@ export function normalizeSceneGraph(raw: unknown, idea: string): SceneGraph {
     })
   }
 
+  // De-duplicate by name — the LLM can emit two `structural_frame` / `envelope_
+  // facade` / etc. Duplicates only stacked overlapping geometry and broke the
+  // viewer's React keys + getObjectByName targeting. Keep the first occurrence.
+  const seenNames = new Set<string>()
+  for (let i = 0; i < cleaned.length; i++) {
+    const nm = cleaned[i]!.name
+    if (seenNames.has(nm)) {
+      cleaned.splice(i, 1)
+      i--
+    } else {
+      seenNames.add(nm)
+    }
+  }
+
   // Guarantee every required group exists; pull from the scaffold if missing.
   const present = new Set(cleaned.map((g) => g.name))
   for (const req of REQUIRED_GROUPS) {
@@ -335,6 +423,13 @@ export function normalizeSceneGraph(raw: unknown, idea: string): SceneGraph {
   // Guarantee at least one floor plate.
   if (!cleaned.some((g) => g.name.startsWith('floor_plate_'))) {
     cleaned.push(...fallback.groups.filter((g) => g.name.startsWith('floor_plate_')))
+  }
+
+  // ASI:One authors the building, not the site — drop in the pre-made landscape
+  // so generated models also sit on real grounds (unless the idea owns it).
+  if (cleaned.length && wantsAutoLandscape(idea) && !hasSiteGroups(cleaned)) {
+    const fp = parseIdea(idea)
+    cleaned.push(...siteLandscape(fp.width, fp.depth))
   }
 
   const floors = Number(obj.floors)
