@@ -2525,6 +2525,9 @@ body:has(.map-page-v2) {
   gap: 0.5rem;
 }
 .carousel__title-row h4 { margin: 0; font-size: 1rem; }
+/* Project-page carousel sits on the white card surface, so the title needs the
+   dark ink (it was inheriting the dark-theme's light ink and washing out). */
+.property-insight .carousel__title-row h4 { color: var(--ink); font-weight: 600; }
 .carousel__zip {
   display: inline-flex;
   align-items: center;
