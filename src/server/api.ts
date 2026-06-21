@@ -1,6 +1,7 @@
-import { Hono } from 'hono'
+﻿import { Hono } from 'hono'
 import { getRedis, keys } from '~/lib/redis'
 import { complete } from '~/lib/claude'
+import { scrapeLocalPartners, mockPartners , type BusinessPartner } from '~/lib/partnerScraper'
 import {
   STATE_SCORES,
   getDistrict,
@@ -24,10 +25,11 @@ import {
 } from '~/lib/browserbase'
 import { generateLandBuyingGuide, seededGuide } from '~/lib/asi'
 
+
 // ---------------------------------------------------------------------------
 // Web API (Hono), mounted inside TanStack Start via `src/routes/api/$.ts`.
 // Owns map reads, project CRUD, Claude calls, and the 10-step state machine.
-// Every route maps to a page flow or one of the 3 agents (BUILD_PLAN §6).
+// Every route maps to a page flow or one of the 3 agents (BUILD_PLAN Â§6).
 //
 // Handlers are intentionally thin stubs returning mock/cached shapes so the
 // frontend is fully runnable today. Real Redis/Claude/agent wiring drops in
@@ -42,12 +44,19 @@ export const api = new Hono().basePath('/api')
 api.get('/health', (c) => c.json({ ok: true, service: 'Constructa-web-api' }))
 
 // --- Map (read-only, cache-backed) -----------------------------------------
-// Implements the interactive-map data plane (master plan §1 phases 1–2 + §3A).
+// Implements the interactive-map data plane (master plan Â§1 phases 1â€“2 + Â§3A).
 // All reads serve from Redis when present, else from the seeded mock cache, so
 // the map renders identically with or without infrastructure.
+// In-memory fallback for the local-partners rotation window when Redis is
+// unavailable. Holds the last 5 distinct districts' shown partner keys so the
+// same business is not shown again until the user clicks through 5 more
+// different districts.
+type PartnerWindowEntry = { regionId: string; keys: string[] }
+let partnersWindowMem: PartnerWindowEntry[] = []
+
 const map = new Hono()
 
-// Phase 1 — Regional Heatmap. National state-level aggregate scores.
+// Phase 1 â€” Regional Heatmap. National state-level aggregate scores.
 // Redis key: map:state:{code}
 map.get('/states', async (c) => {
   const redis = getRedis()
@@ -71,7 +80,7 @@ map.get('/states', async (c) => {
   return c.json({ source: redis ? 'redis|seed' : 'seed', states })
 })
 
-// Phase 2 — District Focus. Drill into a state's metro-district groupings.
+// Phase 2 â€” District Focus. Drill into a state's metro-district groupings.
 map.get('/state/:code/districts', (c) => {
   const code = c.req.param('code')
   return c.json({ state: code, districts: districtsForState(code) })
@@ -108,8 +117,8 @@ map.get('/district/:id/grids', async (c) => {
   return c.json({ source: 'seed', id, grids: d?.grids ?? [] })
 })
 
-// Phase 3 + 4 — Automated Deep-Dive + Agent Consensus Summary.
-// Stage-Safe Mock Bridge (master plan §4): the `x-live-mode` header gates the
+// Phase 3 + 4 â€” Automated Deep-Dive + Agent Consensus Summary.
+// Stage-Safe Mock Bridge (master plan Â§4): the `x-live-mode` header gates the
 // live Browserbase + ASI:One pass. Default (off) serves the frozen guide so a
 // presentation never stalls; any live failure degrades back to the same cache.
 map.post('/district/:id/deep-dive', async (c) => {
@@ -122,7 +131,7 @@ map.post('/district/:id/deep-dive', async (c) => {
   const liveMode = c.req.header('x-live-mode') === 'true'
   const redis = getRedis()
 
-  // Instant presentation path — frozen, pre-generated record.
+  // Instant presentation path â€” frozen, pre-generated record.
   const frozen = async () => {
     if (redis) {
       const pre = await redis.get(keys.preGeneratedGuide(id))
@@ -138,11 +147,11 @@ map.post('/district/:id/deep-dive', async (c) => {
 
   if (!liveMode) return c.json(await frozen())
 
-  // Live execution path — real Browserbase gather + ASI:One evaluation.
+  // Live execution path â€” real Browserbase gather + ASI:One evaluation.
   try {
     const scrape = await executeBrowserbaseScrapePipeline(id, projectType)
     if (redis) {
-      // Persist raw scrapes for the session (master plan §3A).
+      // Persist raw scrapes for the session (master plan Â§3A).
       await redis.del(keys.sessionRawScrapes(id))
       if (scrape.blocks.length)
         await redis.rpush(keys.sessionRawScrapes(id), ...scrape.blocks)
@@ -274,7 +283,7 @@ map.post('/region/:regionId/deep-dive', async (c) => {
     if (redis)
       await redis.set(keys.regionListings(regionId), JSON.stringify(listings), 'EX', 7200)
 
-    // 2. Permit/zoning/sentiment scrape → compressed → ASI factor guide.
+    // 2. Permit/zoning/sentiment scrape â†’ compressed â†’ ASI factor guide.
     const scrape = await executeBrowserbaseScrapePipeline(regionId, 'mixed_use')
     if (redis && scrape.blocks.length) {
       await redis.del(keys.sessionRawScrapes(regionId))
@@ -315,7 +324,7 @@ map.delete('/liked/:id', async (c) => {
   return c.json({ ok: true, id, removed: Boolean(redis) })
 })
 
-// Bonus live action: re-score a district on stage (BUILD_PLAN §4 "refresh").
+// Bonus live action: re-score a district on stage (BUILD_PLAN Â§4 "refresh").
 map.post('/district/:id/refresh', async (c) => {
   const id = c.req.param('id')
   const d = getDistrict(id)
@@ -346,6 +355,127 @@ map.get('/datacenter', (c) =>
     compliance: ['CEQA', 'Generator air permits', 'Cooling noise ordinances'],
   }),
 )
+
+// --- Local Partners: BrowserBase contractor/business + reviews scrape --------
+// Cursor-paginated (page size 8). `x-live-mode: true` runs the live BrowserBase
+// scrape (one session, all trades), caches the full list in Redis (2h), then
+// serves pages from cache. Default/non-live and any failure serve mock so the
+// vertical infinite-scroll list always renders.
+map.get('/region/:regionId/partners', async (c) => {
+  const regionId = c.req.param('regionId')
+  const cursor = Math.max(0, parseInt(c.req.query('cursor') ?? '0', 10) || 0)
+  const pageSize = 8
+  const DISTRICT_BATCH = 8 // partners "claimed" per district
+  const WINDOW_SIZE = 5 // rotate: no repeat until 5 different districts later
+  const liveMode = c.req.header('x-live-mode') === 'true'
+  const refresh =
+    c.req.query('refresh') === 'true' || c.req.header('x-refresh') === 'true'
+  const redis = getRedis()
+
+  // Stable identity for a partner across districts: normalized name + host.
+  const normKey = (p: BusinessPartner) =>
+    `${(p.name || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()}|${(
+      p.sourceSite || ''
+    ).toLowerCase()}`
+
+  // --- Rotation window state (Redis-backed, in-memory fallback) -------------
+  const readWindow = async (): Promise<PartnerWindowEntry[]> => {
+    if (redis) {
+      try {
+        const raw = await redis.get(keys.partnersWindow())
+        if (raw) return JSON.parse(raw) as PartnerWindowEntry[]
+      } catch (err) {
+        console.warn('[partners] window read failed:', err)
+      }
+    }
+    return partnersWindowMem
+  }
+  const writeWindow = async (w: PartnerWindowEntry[]): Promise<void> => {
+    partnersWindowMem = w
+    if (redis) {
+      try {
+        await redis.set(keys.partnersWindow(), JSON.stringify(w), 'EX', 86400)
+      } catch (err) {
+        console.warn('[partners] window write failed:', err)
+      }
+    }
+  }
+
+  const cacheKey = keys.regionPartners(regionId)
+
+  // --- 1. Resolve the full source list for this district -------------------
+  let all: BusinessPartner[] | null = null
+  let live = false
+
+  if (!refresh && redis) {
+    try {
+      const cached = await redis.get(cacheKey)
+      if (cached) {
+        const parsed = JSON.parse(cached) as BusinessPartner[]
+        if (Array.isArray(parsed) && parsed.length) {
+          all = parsed
+          live = true
+        }
+      }
+    } catch (err) {
+      console.warn('[partners] cache read failed:', err)
+    }
+  }
+
+  if (!all) {
+    if (!liveMode) {
+      all = mockPartners(regionId)
+      live = false
+    } else {
+      try {
+        const res = await scrapeLocalPartners(regionId)
+        if (res.live && res.partners.length) {
+          all = res.partners
+          live = true
+          try {
+            if (redis) await redis.set(cacheKey, JSON.stringify(all), 'EX', 7200)
+          } catch (err) {
+            console.warn('[partners] cache write failed:', err)
+          }
+        } else {
+          all = res.partners.length ? res.partners : mockPartners(regionId)
+          live = false
+        }
+      } catch (err) {
+        console.error('[partners] live failed, serving mock:', err)
+        all = mockPartners(regionId)
+        live = false
+      }
+    }
+  }
+
+  // --- 2. Apply the 5-district rotation window -----------------------------
+  const windowState = await readWindow()
+  const blocked = new Set<string>()
+  for (const entry of windowState) {
+    if (entry.regionId !== regionId) for (const k of entry.keys) blocked.add(k)
+  }
+  let rotated = all.filter((p) => !blocked.has(normKey(p)))
+  // Never return an empty list — if everything is blocked, fall back to the
+  // full set (the pool is smaller than 5 districts' worth of partners).
+  if (rotated.length === 0) rotated = all
+
+  const districtBatch = rotated.slice(0, DISTRICT_BATCH)
+
+  // --- 3. Record this district into the rotation window (first page only) ---
+  if (cursor === 0) {
+    const nextWindow: PartnerWindowEntry[] = [
+      { regionId, keys: districtBatch.map(normKey) },
+      ...windowState.filter((e) => e.regionId !== regionId),
+    ].slice(0, WINDOW_SIZE)
+    await writeWindow(nextWindow)
+  }
+
+  // --- 4. Paginate within this district's batch ----------------------------
+  const slice = districtBatch.slice(cursor, cursor + pageSize)
+  const nextCursor = cursor + pageSize < districtBatch.length ? cursor + pageSize : null
+  return c.json({ partners: slice, nextCursor, total: districtBatch.length, live })
+})
 
 api.route('/map', map)
 
@@ -431,7 +561,7 @@ agents.get('/watchdog/:projectId/:step', async (c) => {
     )
     if (res.ok) return c.json(await res.json())
   } catch {
-    // agent-service offline — fall through to mock
+    // agent-service offline â€” fall through to mock
   }
   return c.json({ projectId, step: Number(step), conditions: [], alerts: [] })
 })
