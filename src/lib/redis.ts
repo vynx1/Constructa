@@ -24,6 +24,15 @@ export const keys = {
   projectSequence: (id: string) => `project:${id}:sequence`,
   projectCurrentStep: (id: string) => `project:${id}:current_step`,
   projectRedesign: (id: string) => `project:${id}:redesign`,
+  // project:{id}:model        -> JSON: generated Three.js component registry
+  projectModel: (id: string) => `project:${id}:model`,
+  // project:{id}:plan         -> JSON: universal execution plan + timeline stages
+  projectPlan: (id: string) => `project:${id}:plan`,
+  // project:{id}:data         -> JSON: central project data the agents read from
+  // (partners, ideas, previous problems, solved compliance docs)
+  projectData: (id: string) => `project:${id}:data`,
+  // agent:{projectId}:{tab}   -> List: per-agent conversation/log thread
+  agentThread: (id: string, tab: string) => `agent:${id}:${tab}`,
   ragCodes: () => `rag:codes`,
   ragDistrict: (id: string) => `rag:district:${id}`,
   claudeCache: (hash: string) => `cache:claude:${hash}`,

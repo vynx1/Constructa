@@ -68,6 +68,19 @@ async function asiChat(
  * General single-turn completion — the app's universal LLM entrypoint.
  * Returns a mock string when no key is set so callers stay runnable.
  */
+/**
+ * JSON-mode completion against ASI:One. Returns the raw JSON string (caller
+ * parses). Throws on transport error so callers can fall back deterministically.
+ * Used by the model-generation + execution-plan agents.
+ */
+export async function asiJson(
+  prompt: string,
+  system: string,
+  timeoutMs = 22_000,
+): Promise<string> {
+  return asiChat([{ role: 'user', content: prompt }], { json: true, system, timeoutMs })
+}
+
 export async function asiComplete(prompt: string, system?: string): Promise<string> {
   if (!hasAsiKey()) {
     return `[mock ASI:One response — set ASI_ONE_API_KEY to enable]\n\n${prompt.slice(0, 200)}`

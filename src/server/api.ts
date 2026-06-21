@@ -23,7 +23,17 @@ import {
   executeBrowserbaseScrapePipeline,
   scrapeLandListings,
 } from '~/lib/browserbase'
-import { generateLandBuyingGuide, seededGuide } from '~/lib/asi'
+import { generateLandBuyingGuide, seededGuide, asiComplete } from '~/lib/asi'
+import { generateModel, getModel } from '~/lib/modelGen'
+import { generateExecutionPlan, getExecutionPlan } from '~/lib/executionPlan'
+import {
+  readProjectData,
+  patchProjectData,
+  addProblem,
+  addSolvedCompliance,
+  addDailyLog,
+  groundingContext,
+} from '~/lib/projectData'
 
 
 // ---------------------------------------------------------------------------
@@ -483,11 +493,24 @@ api.route('/map', map)
 const project = new Hono()
 
 project.post('/', async (c) => {
-  const body = await c.req.json().catch(() => ({}))
+  const body = await c.req.json().catch(() => ({})) as {
+    idea?: string
+    description?: string
+    district?: string
+    partners?: string[]
+  }
   const id = crypto.randomUUID()
   const redis = getRedis()
-  const record = { id, status: 'created', ...body }
+  const idea = body.idea ?? body.description ?? ''
+  const district = body.district ?? null
+  const record = { id, status: 'created', idea, district, ...body }
   if (redis) await redis.set(keys.project(id), JSON.stringify(record))
+  // Seed the central project-data document the agents read from (spec §4).
+  await patchProjectData(id, {
+    idea,
+    district,
+    partners: Array.isArray(body.partners) ? body.partners : [],
+  })
   return c.json(record, 201)
 })
 
@@ -531,24 +554,245 @@ project.post('/:id/sequence/advance', async (c) => {
   return c.json({ id, step: next, watchdogFlags: [] })
 })
 
-api.route('/project', project)
-
-// --- Agents (exactly 3, one per agent) -------------------------------------
-const agents = new Hono()
-
-// Voice Log: Deepgram transcript -> structured daily log (Claude).
-agents.post('/voice-log', async (c) => {
-  const body = await c.req.json().catch(() => ({}))
-  return c.json({ log: { summary: 'mock daily log entry', raw: body } })
+// --- Generative 3D model (spec §1) -----------------------------------------
+// POST the idea + parcel context -> ASI:One returns a component registry ->
+// normalized to the mandatory group names -> cached. The model-edit agent
+// button calls this same route with a modified idea to regenerate in place.
+project.post('/:id/generate-model', async (c) => {
+  const id = c.req.param('id')
+  const body = await c.req.json().catch(() => ({})) as {
+    idea?: string
+    context?: string
+    district?: string
+  }
+  const data = await readProjectData(id)
+  const idea = body.idea?.trim() || data.idea || 'a two-story mixed-use building'
+  const context = body.context ?? (data.district ? `District ${data.district}` : undefined)
+  const scene = await generateModel(id, idea, context)
+  // Keep central data in sync so agents know the current idea + type.
+  await patchProjectData(id, {
+    idea,
+    buildingType: scene.buildingType,
+    district: body.district ?? data.district,
+  })
+  return c.json({ id, model: scene })
 })
 
-// RFI Resolution: question -> cited draft answer (Redis vector RAG + Claude).
-agents.post('/rfi', async (c) => {
-  const { question } = await c.req.json().catch(() => ({ question: '' }))
-  const answer = await complete(
-    `Answer this construction RFI with citations: ${question}`,
+project.get('/:id/model', async (c) => {
+  const id = c.req.param('id')
+  const model = await getModel(id)
+  if (!model) return c.json({ id, model: null }, 404)
+  return c.json({ id, model })
+})
+
+// --- Universal execution plan + optimization timeline (spec §3) ------------
+// ASI:One delegates the 6 specialist agents to produce one staged plan:
+// estimated costs, time-to-completion, compliance workflow + timeline, local
+// laws, and CORE compliance work — keyed to the model's mesh groups.
+project.post('/:id/execution-plan', async (c) => {
+  const id = c.req.param('id')
+  const body = await c.req.json().catch(() => ({})) as {
+    idea?: string
+    district?: string
+    context?: string
+  }
+  const data = await readProjectData(id)
+  const idea = body.idea?.trim() || data.idea || 'a two-story mixed-use building'
+  const district = body.district ?? data.district
+  const plan = await generateExecutionPlan(id, idea, district, body.context)
+  return c.json({ id, plan })
+})
+
+project.get('/:id/plan', async (c) => {
+  const id = c.req.param('id')
+  const plan = await getExecutionPlan(id)
+  if (!plan) return c.json({ id, plan: null }, 404)
+  return c.json({ id, plan })
+})
+
+// --- Central project data the agents read from (spec §4) -------------------
+project.get('/:id/data', async (c) => {
+  const id = c.req.param('id')
+  return c.json(await readProjectData(id))
+})
+
+project.patch('/:id/data', async (c) => {
+  const id = c.req.param('id')
+  const patch = await c.req.json().catch(() => ({}))
+  return c.json(await patchProjectData(id, patch))
+})
+
+api.route('/project', project)
+
+// --- Agents (the 6 workspace buttons) --------------------------------------
+// Each button is a grounded ASI:One call: it reads the project's central data
+// (spec §4) for context, then answers in-role. RFI/compliance/permit/hazards
+// follow the same shape; daily-briefing structures a (possibly voice) update;
+// model-edit is handled by /api/project/:id/generate-model.
+const agents = new Hono()
+
+// Generic grounded agent runner: project data -> ASI:One in-role -> answer.
+// Never dead-ends: if ASI:One errors / times out / is keyless, the agent's
+// deterministic fallback answer is served instead of a raw error string.
+async function runGroundedAgent(
+  projectId: string,
+  role: string,
+  system: string,
+  question: string,
+  fallback: string,
+): Promise<{ answer: string; grounding: string }> {
+  const data = await readProjectData(projectId)
+  const grounding = groundingContext(data)
+  const prompt =
+    `Project context:\n${grounding || '(new project, no prior context)'}\n\n` +
+    `${role} request: ${question}`
+  let answer = await asiComplete(prompt, system)
+  if (!answer || answer.startsWith('[ASI:One error') || answer.startsWith('[mock')) {
+    answer = fallback
+  }
+  return { answer, grounding }
+}
+
+// Daily briefing / Log daily work: transcript (text or Deepgram) -> daily log.
+agents.post('/daily-briefing', async (c) => {
+  const body = await c.req.json().catch(() => ({})) as {
+    projectId?: string
+    transcript?: string
+    stage?: string
+  }
+  const projectId = body.projectId ?? 'demo'
+  const transcript = body.transcript ?? ''
+  const { answer } = await runGroundedAgent(
+    projectId,
+    'Daily briefing',
+    'You are Constructa\'s daily-briefing agent. Turn a foreman\'s site update into a ' +
+      'concise structured daily log: crew, weather, work completed, deliveries, and any ' +
+      'issues/blockers. If an issue implies a compliance or schedule risk, name it.',
+    `Site update for stage "${body.stage ?? 'general'}": ${transcript}`,
+    transcript
+      ? `Daily log — stage ${body.stage ?? 'general'}\n• Update: ${transcript}\n• Crew / weather / deliveries: not specified\n• Flagged issues: none noted. Re-run when ASI:One is reachable for a fully structured log.`
+      : 'No site update was captured. Speak or type a 30–60s update and run again.',
   )
-  return c.json({ question, answer, citations: [] })
+  // Persist the structured log to the project record (completed-work bank).
+  if (transcript.trim())
+    await addDailyLog(projectId, body.stage ?? 'general', answer).catch(() => {})
+  return c.json({ projectId, log: { summary: answer, transcript } })
+})
+
+// RFI resolution: question -> cited draft answer, grounded in project data.
+agents.post('/rfi', async (c) => {
+  const body = await c.req.json().catch(() => ({})) as {
+    question?: string
+    projectId?: string
+  }
+  const projectId = body.projectId ?? 'demo'
+  const question = body.question ?? ''
+  const { answer } = await runGroundedAgent(
+    projectId,
+    'RFI',
+    'You are Constructa\'s RFI-resolution agent. Draft a clear, cited answer to a ' +
+      'construction RFI grounded in California building codes. Be specific and reference ' +
+      'the applicable code section where possible.',
+    question,
+    `RFI logged: "${question}". Draft response pending — the applicable references are the California Building Code (Title 24 Part 2) and the local amendments for this jurisdiction. This RFI has been recorded to the project so the team can resolve it once ASI:One is reachable.`,
+  )
+  // An RFI often surfaces an open problem — record it for the agents.
+  if (question.trim()) await addProblem(projectId, 'rfi', question.trim()).catch(() => {})
+  return c.json({ projectId, question, answer, citations: [] })
+})
+
+// Compliance workflows: the CORE compliance work needed for a stage.
+agents.post('/compliance', async (c) => {
+  const body = await c.req.json().catch(() => ({})) as {
+    projectId?: string
+    stage?: string
+    question?: string
+  }
+  const projectId = body.projectId ?? 'demo'
+  const stage = body.stage ?? 'pre-construction'
+  const { answer } = await runGroundedAgent(
+    projectId,
+    'Compliance',
+    'You are Constructa\'s compliance agent for heavily-regulated California construction. ' +
+      'Explain the CORE compliance workflow for the given stage: what to file, with whom, ' +
+      'in what order, and the common rejection reasons. Cite CEQA / Title 24 / CBC where relevant.',
+    body.question ?? `What compliance workflow do I need for the "${stage}" stage?`,
+    `Core compliance for the "${stage}" stage in California: (1) confirm CEQA status (exemption vs. review), (2) verify zoning + setbacks against the parcel, (3) file the building permit application with stamped plans, (4) schedule the required special inspections. Common rejections: incomplete Title 24 forms and missing geotechnical sign-off. Re-run when ASI:One is reachable for a parcel-specific workflow.`,
+  )
+  return c.json({ projectId, stage, answer })
+})
+
+// Permit research: exemption eligibility for the project.
+agents.post('/permit-research', async (c) => {
+  const body = await c.req.json().catch(() => ({})) as {
+    projectId?: string
+    question?: string
+  }
+  const projectId = body.projectId ?? 'demo'
+  const { answer } = await runGroundedAgent(
+    projectId,
+    'Permit research',
+    'You are Constructa\'s permit + exemption research agent. Assess which California ' +
+      'streamlining / exemption pathways the project may qualify for (CEQA exemptions, ' +
+      'SB 35, AB 130, density bonus) and what evidence each requires.',
+    body.question ?? 'Which permit and exemption pathways could this project use?',
+    `Likely California streamlining pathways to check: CEQA categorical/statutory exemptions (Class 32 infill is common), SB 35 ministerial approval (needs affordability + objective-standards conformance), AB 130/AB 1633 timelines, and a state density bonus if affordable units are included. Each requires a conformance memo against the objective standards. Re-run when ASI:One is reachable for an eligibility determination.`,
+  )
+  return c.json({ projectId, answer })
+})
+
+// Hazards: site + environmental hazards bearing on the build.
+agents.post('/hazards', async (c) => {
+  const body = await c.req.json().catch(() => ({})) as {
+    projectId?: string
+    question?: string
+  }
+  const projectId = body.projectId ?? 'demo'
+  const { answer } = await runGroundedAgent(
+    projectId,
+    'Hazards',
+    'You are Constructa\'s hazards agent. Identify the natural + environmental hazards ' +
+      'relevant to the parcel (FEMA flood zone, USGS seismic, CAL FIRE wildfire, ' +
+      'liquefaction, contamination) and the mitigation each forces into the build.',
+    body.question ?? 'What site and environmental hazards should this project plan for?',
+    `Hazards to screen for this parcel: FEMA flood zone (drives finished-floor elevation + flood venting), USGS seismic + liquefaction (drives foundation design per CBC Ch. 18), CAL FIRE wildfire severity (drives WUI Ch. 7A assemblies), and any contamination history (Phase I ESA). Each unresolved hazard forces a specific mitigation before permitting. Re-run when ASI:One is reachable for parcel-specific overlays.`,
+  )
+  return c.json({ projectId, answer })
+})
+
+// Record a compliance item the project has cleared (timeline check-off).
+agents.post('/compliance/solve', async (c) => {
+  const body = await c.req.json().catch(() => ({})) as {
+    projectId?: string
+    title?: string
+    stage?: string
+    reference?: string
+  }
+  const projectId = body.projectId ?? 'demo'
+  const data = await addSolvedCompliance(
+    projectId,
+    body.title ?? 'compliance item',
+    body.stage ?? 'general',
+    body.reference,
+  )
+  return c.json({ projectId, solvedCompliance: data.solvedCompliance })
+})
+
+// Voice Log: Deepgram transcript -> structured daily log (proxies to agent svc).
+agents.post('/voice-log', async (c) => {
+  const body = await c.req.json().catch(() => ({}))
+  try {
+    const res = await fetch(`${AGENT_SERVICE_URL()}/voice-log`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(4000),
+    })
+    if (res.ok) return c.json(await res.json())
+  } catch {
+    // agent-service offline — fall through to mock
+  }
+  return c.json({ log: { summary: 'mock daily log entry', raw: body } })
 })
 
 // Compliance Watchdog: conditions active/at-risk at a step (Fetch.ai uAgent).
@@ -561,7 +805,7 @@ agents.get('/watchdog/:projectId/:step', async (c) => {
     )
     if (res.ok) return c.json(await res.json())
   } catch {
-    // agent-service offline â€” fall through to mock
+    // agent-service offline — fall through to mock
   }
   return c.json({ projectId, step: Number(step), conditions: [], alerts: [] })
 })

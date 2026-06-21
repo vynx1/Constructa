@@ -159,6 +159,18 @@ export function DeepDiveResearchPanel({
                     onClick={() => {
                       try {
                         sessionStorage.setItem('Constructa:district', regionId)
+                        // Forward-cache the full deep-dive so the project page can
+                        // render the 6 consensus cards + this carousel with no refetch.
+                        if (data) {
+                          sessionStorage.setItem(
+                            'Constructa:deepDive',
+                            JSON.stringify({
+                              regionId,
+                              regionLabel: regionLabel ?? regionId,
+                              deepDive: data,
+                            }),
+                          )
+                        }
                       } catch {
                         /* SSR / private mode */
                       }

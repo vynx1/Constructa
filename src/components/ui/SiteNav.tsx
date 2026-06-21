@@ -11,7 +11,7 @@ export function SiteNav() {
 
         <div className="nav__status font-mono" aria-live="polite">
           <span className="nav__status-dot" aria-hidden />
-          3 agents active · CA compliance online
+          6 agents active · CA compliance online
         </div>
 
         <div className="nav__links">
