@@ -72,6 +72,26 @@ function getSeedPartners(regionId: string): BusinessPartner[] | null {
   return Array.isArray(partners) && partners.length > 0 ? partners : null
 }
 
+
+// --- Agentverse guaranteed dispatch (fire-and-forget) -----------------------
+// Ensures all 6 hosted specialist agents receive a real Chat-Protocol message
+// on EVERY district/region research — regardless of live mode. This is what
+// increments their interaction counters on agentverse.ai.
+async function dispatchToAgents(prompt: string): Promise<void> {
+  const url = (process.env.AGENT_SERVICE_URL ?? 'http://localhost:8000') + '/agents/dispatch'
+  try {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ prompt }),
+    })
+    const j: any = await res.json().catch(() => ({}))
+    console.log('[agentverse] dispatched to', j?.delivered ?? '?', '/', j?.total ?? 6, 'agents')
+  } catch (e) {
+    console.warn('[agentverse] dispatch failed (agent-service down?):', (e as Error).message)
+  }
+}
+
 export const api = new Hono().basePath('/api')
 
 api.get('/health', (c) => c.json({ ok: true, service: 'Constructa-web-api' }))
@@ -163,6 +183,9 @@ map.post('/district/:id/deep-dive', async (c) => {
     (await c.req.json().catch(() => ({}))).projectType ?? 'mixed_use'
   const liveMode = c.req.header('x-live-mode') === 'true'
   const redis = getRedis()
+
+  // Fire agent dispatch on EVERY district research (no-await, fire-and-forget).
+  dispatchToAgents(`Constructa district research: evaluate ${id} for ${projectType} development suitability in California.`)
 
   // Instant presentation path â€” frozen, pre-generated record.
   const frozen = async () => {
@@ -292,6 +315,9 @@ map.post('/region/:regionId/deep-dive', async (c) => {
 
   const liveMode = c.req.header('x-live-mode') === 'true'
   const redis = getRedis()
+
+  // Fire agent dispatch on EVERY region research (no-await, fire-and-forget).
+  dispatchToAgents(`Constructa region research: evaluate ${regionId} for mixed-use development suitability in California.`)
 
   // Stage-safe default: instant, deterministic, network-free seeded guide.
   const frozen = async () => {
