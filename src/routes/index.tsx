@@ -57,7 +57,7 @@ function LandingPage() {
               Build faster where the&nbsp;rules are hardest.
             </h1>
             <p className="hero__sub max-w-max">
-              Construca turns California’s tangle of compliance regimes into
+              Constructa turns California’s tangle of compliance regimes into
               something autonomous agents collect, classify, and file — so the
               only bottleneck left is how fast you can pour.
             </p>
@@ -85,7 +85,7 @@ function LandingPage() {
       <SectionDivider />
 
       <section className="section section--compact reveal-section">
-        <p className="section__eyebrow font-mono">Why Construca</p>
+        <p className="section__eyebrow font-mono">Why Constructa</p>
         <h2 className="section__title section__title--wide">
           The land-to-launch loop, compressed.
         </h2>

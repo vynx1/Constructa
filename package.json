@@ -1,9 +1,9 @@
 {
-  "name": "Construca",
+  "name": "Constructa",
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Construca — AI construction foreman + land-intelligence platform",
+  "description": "Constructa — AI construction foreman + land-intelligence platform",
   "scripts": {
     "dev": "vite dev --port 3000",
     "build": "vite build",

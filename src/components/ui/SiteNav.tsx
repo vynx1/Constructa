@@ -6,7 +6,7 @@ export function SiteNav() {
       <nav className="nav nav--command" aria-label="Main">
         <Link to="/" className="nav__brand">
           <span className="nav__brand-mark" aria-hidden />
-          Construca
+          Constructa
         </Link>
 
         <div className="nav__status font-mono" aria-live="polite">

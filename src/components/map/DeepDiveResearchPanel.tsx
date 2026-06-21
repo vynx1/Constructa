@@ -133,7 +133,7 @@ export function DeepDiveResearchPanel({
                     className="btn btn--primary insight-stack__cta"
                     onClick={() => {
                       try {
-                        sessionStorage.setItem('construca:district', regionId)
+                        sessionStorage.setItem('Constructa:district', regionId)
                       } catch {
                         /* SSR / private mode */
                       }

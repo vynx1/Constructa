@@ -39,7 +39,7 @@ const AGENT_SERVICE_URL = () =>
 
 export const api = new Hono().basePath('/api')
 
-api.get('/health', (c) => c.json({ ok: true, service: 'Construca-web-api' }))
+api.get('/health', (c) => c.json({ ok: true, service: 'Constructa-web-api' }))
 
 // --- Map (read-only, cache-backed) -----------------------------------------
 // Implements the interactive-map data plane (master plan §1 phases 1–2 + §3A).
@@ -375,7 +375,7 @@ project.post('/:id/redesign', async (c) => {
   const id = c.req.param('id')
   const text = await complete(
     `Produce a structured construction redesign plan for project ${id}.`,
-    'You are Construca, an AI construction foreman.',
+    'You are Constructa, an AI construction foreman.',
   )
   return c.json({ id, redesign: text })
 })

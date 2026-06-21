@@ -23,7 +23,7 @@ async function reachableImage(url: string): Promise<boolean> {
     const res = await fetch(url, {
       method: 'HEAD',
       signal: AbortSignal.timeout(8_000),
-      headers: { 'user-agent': 'Construca-ImageVerifier/1.0' },
+      headers: { 'user-agent': 'Constructa-ImageVerifier/1.0' },
     })
     if (!res.ok) return false
     const ct = res.headers.get('content-type') ?? ''
@@ -33,7 +33,7 @@ async function reachableImage(url: string): Promise<boolean> {
       const res = await fetch(url, {
         method: 'GET',
         signal: AbortSignal.timeout(8_000),
-        headers: { 'user-agent': 'Construca-ImageVerifier/1.0', range: 'bytes=0-512' },
+        headers: { 'user-agent': 'Constructa-ImageVerifier/1.0', range: 'bytes=0-512' },
       })
       const ct = res.headers.get('content-type') ?? ''
       return res.ok && (ct.startsWith('image/') || ct.includes('octet-stream'))

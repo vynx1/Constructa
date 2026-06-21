@@ -2,7 +2,7 @@
 // ASI:One client — the universal LLM + agent router (master plan §3C).
 //
 // Two responsibilities:
-//   1. asiComplete()  — general text completion. Construca uses ASI:One as its
+//   1. asiComplete()  — general text completion. Constructa uses ASI:One as its
 //      ONLY LLM now (Anthropic removed); src/lib/claude.ts delegates here.
 //   2. generateLandBuyingGuide() — the land-acquisition agent loop that returns
 //      a factor-scored, source-backed buy/hold/avoid recommendation, with the
@@ -346,22 +346,22 @@ interface AgentSpec {
 }
 
 const AGENTVERSE_REGISTRY: AgentSpec[] = [
-  { factorKey: 'zoning', label: 'Zoning Availability', name: 'ConstructaZoning', handle: '@construca-zoning',
+  { factorKey: 'zoning', label: 'Zoning Availability', name: 'ConstructaZoning', handle: '@Constructa-zoning',
     address: 'agent1q0nvgyxvqn8ckesy8mxq5n3mf3lntw9hg84scn8ushydsvlejfhfj746x8f',
     specialty: 'California zoning, parcel buildability, ArcGIS land availability, tribal/DoD exclusions', weight: 1 },
-  { factorKey: 'permits', label: 'Permit Velocity', name: 'ConstructaPermits', handle: '@construca-permits',
+  { factorKey: 'permits', label: 'Permit Velocity', name: 'ConstructaPermits', handle: '@Constructa-permits',
     address: 'agent1q05vdlht6c89r9cjpz0hf6w43svp0ukh2n4u855q0fqfmrdkjvnfq2awq48',
     specialty: 'California building permit approval velocity and median processing time', weight: 1 },
-  { factorKey: 'sentiment', label: 'Community Sentiment', name: 'ConstructaLocalDev', handle: '@construca-local-dev',
+  { factorKey: 'sentiment', label: 'Community Sentiment', name: 'ConstructaLocalDev', handle: '@Constructa-local-dev',
     address: 'agent1qf9wp6hcex75s0nmdd2k7d3p30f4peg3fjvwqggmn8agt44c97wfkyguufp',
     specialty: 'California nearby active development momentum and community/permit activity', weight: 0.8 },
-  { factorKey: 'cost', label: 'Land Cost Value', name: 'ConstrucaLandCost', handle: '@construca-land-cost',
+  { factorKey: 'cost', label: 'Land Cost Value', name: 'ConstructaLandCost', handle: '@Constructa-land-cost',
     address: 'agent1qfcmtv9f7y5vejvwn225ahkksxg4p2jayc6sfckj83t58tkpvx5mjvka025',
     specialty: 'California land price per acre comps and construction cost multiplier', weight: 1 },
-  { factorKey: 'hazard', label: 'Environmental / Hazard Risk', name: 'ConstructaHazards', handle: '@construca-hazards',
+  { factorKey: 'hazard', label: 'Environmental / Hazard Risk', name: 'ConstructaHazards', handle: '@Constructa-hazards',
     address: 'agent1qgprdps4cvspas6en82mxw82mj8zx2ft34447scav0mxq9et46czvaqxt33',
     specialty: 'California natural hazards: FEMA flood zone, USGS seismic, CAL FIRE wildfire risk', weight: 1 },
-  { factorKey: 'infrastructure', label: 'Infrastructure & Environmental Regulation', name: 'ConstrucaEnvironment', handle: '@construcaenvironment',
+  { factorKey: 'infrastructure', label: 'Infrastructure & Environmental Regulation', name: 'ConstructaEnvironment', handle: '@Constructaenvironment',
     address: 'agent1q0pp6s97ymdv87tpuauj8gwcw9k7gaxusf2qxtnykdhn7lywk44t5njug2y',
     specialty: 'California CEQA tier, Coastal Commission, CDFW wetlands/habitat & infrastructure constraints', weight: 1 },
 ]
@@ -506,7 +506,7 @@ export async function generateLandBuyingGuide(
       zoning: byKey('zoning')?.reasoning ?? 'Zoning evaluated by ConstructaZoning agent.',
       permits: byKey('permits')?.reasoning ?? 'Permit velocity evaluated by ConstructaPermits agent.',
       crowd_demands: byKey('sentiment')?.reasoning ?? 'Community sentiment evaluated by ConstructaLocalDev agent.',
-      testimonials: byKey('cost')?.reasoning ?? 'Land cost evaluated by ConstrucaLandCost agent.',
+      testimonials: byKey('cost')?.reasoning ?? 'Land cost evaluated by ConstructaLandCost agent.',
       source: weak.length ? `asi:agentverse (low-confidence: ${weak.join(', ')})` : 'asi:agentverse',
     }
   } catch (err) {
