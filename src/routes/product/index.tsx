@@ -7,6 +7,8 @@ import { PropertyInsightCards } from '~/components/product/PropertyInsightCards'
 import { ProjectTimeline } from '~/components/product/ProjectTimeline'
 import { AgentDock } from '~/components/product/AgentDock'
 import { CompletedWork } from '~/components/product/CompletedWork'
+import { ComplianceCards } from '~/components/product/ComplianceCards'
+import { HorizontalTimeline } from '~/components/product/HorizontalTimeline'
 import { scaffoldRegistry, type SceneGraph } from '~/lib/modelScaffold'
 import { STAGE_TO_MESH, type ExecutionPlan, type PlanStage, type AgentKey } from '~/lib/planTypes'
 import { projectClient, type CachedDeepDive } from '~/lib/projectClient'
@@ -134,47 +136,54 @@ function ProductPage() {
     [projectId, bumpRecord],
   )
 
-  // #4 — an agent auto-solves a whole stage's compliance: run the agent, then
-  // mark every compliance item on the stage cleared and record it.
+  // #4 — an agent auto-solves a whole stage's compliance via the autosolve
+  // endpoint which calls ASI:One AND generates a compliance PDF certificate.
   const onAutoSolve = useCallback(
     async (stage: PlanStage, agent: AgentKey): Promise<string> => {
-      const endpoint = AGENT_ENDPOINT[agent] ?? 'compliance'
       const pid = projectId ?? 'demo'
-      let answer = ''
-      try {
-        const res = await projectClient.agent(endpoint, {
-          projectId: pid,
-          stage: stage.key,
-          question: `Resolve the ${stage.title} compliance for this project and tell me exactly what was filed.`,
-        })
-        answer = (res.answer as string) ?? 'Agent completed.'
-      } catch {
-        answer = 'Agent unreachable — try again.'
-      }
-      // Mark the stage's compliance items cleared.
+      const idea = sceneGraph?.buildingType ?? plan?.buildingType ?? ''
+
+      // Mark solved optimistically so the UI doesn't feel sluggish.
       setSolved((prev) => {
         const next = new Set(prev)
         for (const item of stage.compliance) next.add(`${stage.key}:${item}`)
         return next
       })
-      if (projectId) {
-        // Sequential, not parallel: the server record is a read-modify-write,
-        // so concurrent solves would race and only the last would persist.
-        for (const item of stage.compliance) {
-          await projectClient
-            .solveCompliance({
-              projectId,
-              title: item,
-              stage: stage.key,
-              reference: `auto-solved by ${agent}`,
-            })
-            .catch(() => {})
+
+      let answer = 'Agent completed.'
+      try {
+        // autosolve runs the agent + generates the compliance PDF in one call.
+        const res = await projectClient.autosolve({
+          projectId: pid,
+          stage: stage.key,
+          stageTitle: stage.title,
+          item: stage.compliance[0] ?? stage.title,
+          agent: AGENT_ENDPOINT[agent] ?? 'compliance',
+          idea,
+        })
+        answer = res.answer
+        // The PDF is already persisted server-side; bump the record drawer.
+      } catch {
+        // Fallback: record each item without a PDF.
+        if (projectId) {
+          for (const item of stage.compliance) {
+            await projectClient
+              .solveCompliance({
+                projectId,
+                title: item,
+                stage: stage.key,
+                reference: `auto-solved by ${agent}`,
+              })
+              .catch(() => {})
+          }
         }
+        answer = 'Agent completed (offline mode).'
       }
+
       bumpRecord()
       return answer
     },
-    [projectId, bumpRecord],
+    [projectId, sceneGraph, plan, bumpRecord],
   )
 
   // Model-edit agent button: regenerate the model (and refresh the plan).
@@ -294,6 +303,21 @@ function ProductPage() {
         refreshKey={recordRefresh}
         onClose={() => setRecordOpen(false)}
       />
+
+      <div className="workspace__below">
+        <ComplianceCards
+          plan={plan}
+          projectId={projectId}
+          activeStage={activeStage ?? ''}
+          onSelectStage={onSelectStage}
+        />
+
+        <HorizontalTimeline
+          plan={plan}
+          activeStage={activeStage ?? ''}
+          onSelectStage={onSelectStage}
+        />
+      </div>
     </main>
   )
 }

@@ -5,7 +5,7 @@ import { X, Check, ClipboardList, ShieldCheck, AlertCircle } from 'lucide-react'
 // of cleared compliance work with status, plus the bank of completed compliance,
 // daily logs, and open items. Reads the central project-data record (spec §4).
 
-interface SolvedCompliance { id: string; at: string; title: string; stage: string }
+interface SolvedCompliance { id: string; at: string; title: string; stage: string; pdfDataUrl?: string }
 interface DailyLog { id: string; at: string; stage: string; text: string }
 interface Problem { id: string; at: string; stage: string; summary: string; resolved: boolean }
 interface ProjectData {
@@ -102,6 +102,16 @@ export function CompletedWork({ projectId, open, refreshKey, onClose }: Props) {
                       <span className="snake-node__meta">
                         {s.stage} · {timeAgo(s.at)}
                       </span>
+                      {s.pdfDataUrl && (
+                        <a
+                          href={s.pdfDataUrl}
+                          download={`compliance-${s.stage}-${s.id}.pdf`}
+                          className="snake-node__pdf-btn"
+                          aria-label={`Download compliance PDF for ${s.title}`}
+                        >
+                          ↓ PDF
+                        </a>
+                      )}
                       {i < row.length - 1 && <span className="snake-node__link" />}
                     </div>
                   ))}

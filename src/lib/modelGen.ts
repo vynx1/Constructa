@@ -32,21 +32,43 @@ const MODELER_AGENT = {
 } as const
 
 const MODEL_SYSTEM =
-  `You are the ASI:One agent router. Route this request to the Agentverse specialist ` +
-  `agent "${MODELER_AGENT.name}" (${MODELER_AGENT.handle}, address ${MODELER_AGENT.address}), ` +
-  `whose specialty is generating Three.js building models as a component registry. ` +
-  `Act as that agent: turn the construction idea into a Three.js COMPONENT REGISTRY ` +
-  'assembled ONLY from a constrained primitive library (BoxGeometry / CylinderGeometry). ' +
-  'Do NOT invent arbitrary geometry. Return STRICT JSON: ' +
-  '{ "buildingType": <string>, "floors": <int>, "groups": [ { "name": <string>, ' +
-  '"type": "BoxGeometry"|"CylinderGeometry", "args": <number[]>, "position": [x,y,z], ' +
-  '"material": "concrete"|"steel"|"mep"|"glass"|"roofing"|"landscape" } ] }. ' +
-  'You MUST include these exact group names (the viewer targets them by name): ' +
-  'foundation_slab, floor_plate_1 .. floor_plate_N (one per storey), structural_frame, ' +
-  'mep_layer, envelope_facade, roof_form. Units are meters; Y is up; the foundation ' +
-  'sits at grade (y≈0). A floor height of ~3.5m is realistic. Scale the footprint and ' +
-  'floor count to the idea (a warehouse is wide and low; an office tower is tall and ' +
-  'slim). Be geometrically consistent so the parts stack into one coherent building.'
+  `You are the ASI:One agent router acting as the Agentverse specialist ` +
+  `"${MODELER_AGENT.name}" (${MODELER_AGENT.handle}). ` +
+  `Your specialty: generate accurate, geometrically distinctive Three.js building models ` +
+  `as a component registry using ONLY BoxGeometry / CylinderGeometry primitives. ` +
+  `Think deeply about the building type before generating geometry — each type must look ` +
+  `structurally different, not just a resized box. ` +
+  `\n\nReturn STRICT JSON: { "buildingType": <string>, "floors": <int>, "groups": [ { ` +
+  `"name": <string>, "type": "BoxGeometry"|"CylinderGeometry", "args": <number[]>, ` +
+  `"position": [x,y,z], "rotation"?: [rx,ry,rz], ` +
+  `"material": "concrete"|"steel"|"mep"|"glass"|"roofing"|"landscape" } ] }. ` +
+  `\n\nMANDATORY group names (viewer targets these by name): ` +
+  `foundation_slab, floor_plate_1..floor_plate_N (one per storey), structural_frame, ` +
+  `mep_layer, envelope_facade, roof_form. You MAY add extra named groups for ` +
+  `building-specific features (ramp, garage_volume, setback_tier, secondary_wing, etc.). ` +
+  `\n\nUnits: meters; Y is up; foundation at y≈0; standard floor height 3.5m. ` +
+  `\n\nPER-TYPE GEOMETRY RULES (follow strictly): ` +
+  `\n• PARKING STRUCTURE: floors 3-6 max, floor height 2.8m (NOT 3.5m). Wide low footprint ` +
+  `(60m×28m typical). No glass facade — use open concrete bay_frame sides. Add ramp_access ` +
+  `group: BoxGeometry [4, 0.3, 28] rotated ~0.2rad on X axis, positioned at one end. ` +
+  `Material: concrete throughout. Flat roof. ` +
+  `\n• LUXURY PENTHOUSE TOWER: slim tower base 26m×22m, 30-45 floors. Every 8 floors add ` +
+  `a setback_tier_N group (2m narrower each side) using BoxGeometry for the setback slab. ` +
+  `Full-height glass curtain wall facade. Add terrace_deck groups at each setback. ` +
+  `Steel + glass materials. Flat contemporary roof. ` +
+  `\n• SCHOOL / CAMPUS: 2-4 floors, wide main wing (40m×24m). Add secondary_wing group ` +
+  `(BoxGeometry [28,12,18] offset by +25m on X). Add gymnasium_volume group ` +
+  `(BoxGeometry [22,8,16] offset -20m X, 0m Y from grade). Low pitched roof possible. ` +
+  `\n• SINGLE-FAMILY HOME: 1-2 floors only, small footprint 14m×12m. Add garage_volume ` +
+  `(BoxGeometry [6,3,6] offset to one side). Replace flat roof_form with two gable panels: ` +
+  `roof_gable_left BoxGeometry [8,0.2,12] rotated 0.4rad, roof_gable_right mirror. ` +
+  `Concrete + wood materials. ` +
+  `\n• WAREHOUSE / INDUSTRIAL: 1-2 floors, massive footprint (50m×35m). Add loading_dock ` +
+  `group (BoxGeometry [12,4,6] at rear). Barrel/shed roof: roof_ridge cylinder on top. ` +
+  `\n• OFFICE TOWER: 10-30 floors, 24m×24m, full curtain-wall glass facade, steel frame. ` +
+  `\n• HOTEL: 8-20 floors, 26m×20m, glass + concrete, add lobby_volume at grade. ` +
+  `\nFor any type not listed above: pick geometrically appropriate dimensions and extras. ` +
+  `Think like a real architect — make each building visually unmistakable.`
 
 /**
  * Generate (or regenerate) the scene graph for a project from its idea text.
@@ -70,22 +92,34 @@ export async function generateModel(
     (context ? `Parcel / area context: ${context}\n` : '') +
     `Return the component registry now.`
 
-  try {
-    // Fail fast to the deterministic (home-page-style) model: the client already
-    // shows the instant scaffold, and ASI:One's JSON path is latency-prone.
-    const json = await asiJson(user, MODEL_SYSTEM, 15_000)
-    const parsed = JSON.parse(json)
-    const scene = normalizeSceneGraph(parsed, idea)
-    scene.source = 'asi:agentverse'
-    arize.logSuccess({ agentId: 'asi_model_gen' })
-    await persist(projectId, scene)
-    return scene
-  } catch (err) {
-    arize.logError('asi_model_gen', (err as Error).message)
-    const scene = scaffoldRegistry(idea)
-    await persist(projectId, scene)
-    return scene
+  // Retry once on failure — ASI:One can be slow on detailed geometry prompts.
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    try {
+      const json = await asiJson(user, MODEL_SYSTEM, 45_000)
+      const parsed = JSON.parse(json)
+      if (!parsed || !Array.isArray(parsed.groups) || parsed.groups.length === 0) {
+        throw new Error('Empty or invalid groups array')
+      }
+      const scene = normalizeSceneGraph(parsed, idea)
+      scene.source = 'asi:agentverse'
+      arize.logSuccess({ agentId: 'asi_model_gen' })
+      await persist(projectId, scene)
+      return scene
+    } catch (err) {
+      arize.logError(`asi_model_gen(attempt ${attempt})`, (err as Error).message)
+      if (attempt === 2) {
+        const scene = scaffoldRegistry(idea)
+        await persist(projectId, scene)
+        return scene
+      }
+      // Brief pause before retry so ASI:One isn't hit immediately again.
+      await new Promise((r) => setTimeout(r, 2_000))
+    }
   }
+  // Unreachable but satisfies TypeScript.
+  const scene = scaffoldRegistry(idea)
+  await persist(projectId, scene)
+  return scene
 }
 
 async function persist(projectId: string, scene: SceneGraph): Promise<void> {

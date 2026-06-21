@@ -79,13 +79,15 @@ export function parseIdea(idea: string): ParsedIdea {
     width = w
     depth = d
   }
-  if (/warehouse|distribution|logistics|fulfillment/.test(text)) set('warehouse', 48, 32)
+  if (/parking|park ?structure|car ?park|parking garage/.test(text)) set('parking structure', 60, 28)
+  else if (/penthouse|ultra[\s-]?luxury|luxury tower|luxury high[\s-]?rise/.test(text)) set('luxury penthouse tower', 26, 22)
+  else if (/warehouse|distribution|logistics|fulfillment/.test(text)) set('warehouse', 48, 32)
   else if (/data ?center|server farm/.test(text)) set('data center', 40, 30)
   else if (/mall|shopping|retail center|plaza/.test(text)) set('retail center', 44, 30)
   else if (/office|corporate|hq|headquarters/.test(text)) set('office tower', 24, 24)
   else if (/hotel|hospitality|resort/.test(text)) set('hotel', 26, 20)
   else if (/hospital|clinic|medical/.test(text)) set('medical facility', 34, 26)
-  else if (/school|campus|university|college/.test(text)) set('institutional', 38, 24)
+  else if (/school|campus|university|college/.test(text)) set('school campus', 38, 24)
   // Explicit "mixed-use" wins over the apartment/retail keywords it contains.
   else if (/mixed[\s-]?use/.test(text)) set('mixed-use building', 22, 18)
   else if (/apartment|residential|condo|housing|multifamily|multi-family/.test(text))
@@ -114,74 +116,181 @@ export function buildingHeight(floors: number): number {
  * Build a complete, valid scene graph from an idea string using only the
  * constrained primitive library. Always produces every required group so the
  * viewer + timeline targeting never breaks.
+ *
+ * Building types produce geometrically distinct models — not just resized boxes.
  */
 export function scaffoldRegistry(idea: string): SceneGraph {
   const { buildingType, floors, width, depth } = parseIdea(idea)
+
+  if (buildingType === 'parking structure') return scaffoldParking(buildingType, floors, width, depth)
+  if (buildingType === 'luxury penthouse tower') return scaffoldPenthouse(buildingType, floors, width, depth)
+  if (buildingType === 'school campus') return scaffoldSchool(buildingType, floors, width, depth)
+  if (buildingType === 'single-family home') return scaffoldHome(buildingType, floors, width, depth)
+  if (buildingType === 'warehouse') return scaffoldWarehouse(buildingType, floors, width, depth)
+  return scaffoldGeneric(buildingType, floors, width, depth)
+}
+
+function scaffoldGeneric(buildingType: string, floors: number, width: number, depth: number): SceneGraph {
   const groups: ModelGroup[] = []
+  const isGlassy = /office|hotel|hospital|residential|mixed/.test(buildingType)
 
-  // 1. Foundation slab — sits at grade.
-  groups.push({
-    name: 'foundation_slab',
-    type: 'BoxGeometry',
-    args: [width + 0.6, SLAB, depth + 0.6],
-    position: [0, SLAB / 2, 0],
-    material: 'concrete',
-  })
+  groups.push({ name: 'foundation_slab', type: 'BoxGeometry', args: [width + 0.6, SLAB, depth + 0.6], position: [0, SLAB / 2, 0], material: 'concrete' })
 
-  // 2. Floor plates — one per storey (floor_plate_1..N).
   for (let i = 0; i < floors; i++) {
-    const y = SLAB + i * FLOOR_HEIGHT + 0.15
-    groups.push({
-      name: `floor_plate_${i + 1}`,
-      type: 'BoxGeometry',
-      args: [width, 0.3, depth],
-      position: [0, y, 0],
-      material: 'concrete',
-    })
+    groups.push({ name: `floor_plate_${i + 1}`, type: 'BoxGeometry', args: [width, 0.3, depth], position: [0, SLAB + i * FLOOR_HEIGHT + 0.15, 0], material: 'concrete' })
   }
 
-  const topPlateY = SLAB + (floors - 1) * FLOOR_HEIGHT + 0.15
-  const frameTop = topPlateY + FLOOR_HEIGHT
+  const frameTop = SLAB + floors * FLOOR_HEIGHT
   const frameHeight = frameTop - SLAB
   const frameMidY = SLAB + frameHeight / 2
 
-  // 3. Structural frame — full-height steel cage (rendered as a wire cage).
-  groups.push({
-    name: 'structural_frame',
-    type: 'BoxGeometry',
-    args: [width, frameHeight, depth],
-    position: [0, frameMidY, 0],
-    material: 'steel',
-  })
-
-  // 4. MEP layer — a service plenum just under the roof.
-  groups.push({
-    name: 'mep_layer',
-    type: 'BoxGeometry',
-    args: [width - 1.5, 0.8, depth - 1.5],
-    position: [0, frameTop - 0.6, 0],
-    material: 'mep',
-  })
-
-  // 5. Envelope / facade — the glazed curtain wall (front face).
-  groups.push({
-    name: 'envelope_facade',
-    type: 'BoxGeometry',
-    args: [width + 0.2, frameHeight, 0.2],
-    position: [0, frameMidY, depth / 2],
-    material: 'glass',
-  })
-
-  // 6. Roof form — cap.
-  groups.push({
-    name: 'roof_form',
-    type: 'BoxGeometry',
-    args: [width, 0.4, depth],
-    position: [0, frameTop + 0.2, 0],
-    material: 'roofing',
-  })
+  groups.push({ name: 'structural_frame', type: 'BoxGeometry', args: [width, frameHeight, depth], position: [0, frameMidY, 0], material: 'steel' })
+  groups.push({ name: 'mep_layer', type: 'BoxGeometry', args: [width - 1.5, 0.8, depth - 1.5], position: [0, frameTop - 0.6, 0], material: 'mep' })
+  groups.push({ name: 'envelope_facade', type: 'BoxGeometry', args: [width + 0.2, frameHeight, 0.2], position: [0, frameMidY, depth / 2], material: isGlassy ? 'glass' : 'concrete' })
+  groups.push({ name: 'roof_form', type: 'BoxGeometry', args: [width, 0.4, depth], position: [0, frameTop + 0.2, 0], material: 'roofing' })
 
   return { buildingType, floors, groups, source: 'scaffold' }
+}
+
+function scaffoldParking(buildingType: string, floors: number, width: number, depth: number): SceneGraph {
+  const groups: ModelGroup[] = []
+  const fh = 2.8 // parking floor height is lower than standard
+
+  groups.push({ name: 'foundation_slab', type: 'BoxGeometry', args: [width + 0.6, SLAB, depth + 0.6], position: [0, SLAB / 2, 0], material: 'concrete' })
+
+  for (let i = 0; i < floors; i++) {
+    groups.push({ name: `floor_plate_${i + 1}`, type: 'BoxGeometry', args: [width, 0.25, depth], position: [0, SLAB + i * fh + 0.15, 0], material: 'concrete' })
+  }
+
+  const frameTop = SLAB + floors * fh
+  const frameHeight = frameTop - SLAB
+  const frameMidY = SLAB + frameHeight / 2
+
+  // Open concrete bay frame — no glass, open sides.
+  groups.push({ name: 'structural_frame', type: 'BoxGeometry', args: [width, frameHeight, depth], position: [0, frameMidY, 0], material: 'concrete' })
+  groups.push({ name: 'mep_layer', type: 'BoxGeometry', args: [width - 2, 0.5, depth - 2], position: [0, frameTop - 0.4, 0], material: 'mep' })
+  // Open concrete parapet instead of glass facade.
+  groups.push({ name: 'envelope_facade', type: 'BoxGeometry', args: [width + 0.2, frameHeight, 0.3], position: [0, frameMidY, depth / 2], material: 'concrete' })
+  groups.push({ name: 'roof_form', type: 'BoxGeometry', args: [width, 0.3, depth], position: [0, frameTop + 0.15, 0], material: 'concrete' })
+  // Ramp — angled slab at one end of the structure.
+  groups.push({ name: 'ramp_access', type: 'BoxGeometry', args: [6, 0.3, depth * 0.8], position: [width / 2 - 4, frameMidY, 0], rotation: [0.22, 0, 0], material: 'concrete' })
+
+  return { buildingType, floors, groups, source: 'scaffold' }
+}
+
+function scaffoldPenthouse(buildingType: string, floors: number, width: number, depth: number): SceneGraph {
+  const groups: ModelGroup[] = []
+  // Default penthouse to tall tower if not specified.
+  const actualFloors = Math.max(floors, 24)
+
+  groups.push({ name: 'foundation_slab', type: 'BoxGeometry', args: [width + 0.6, SLAB, depth + 0.6], position: [0, SLAB / 2, 0], material: 'concrete' })
+
+  for (let i = 0; i < actualFloors; i++) {
+    // Setback: each tier of 8 floors is 2m narrower on each side.
+    const tier = Math.floor(i / 8)
+    const tw = Math.max(14, width - tier * 2)
+    const td = Math.max(12, depth - tier * 2)
+    groups.push({ name: `floor_plate_${i + 1}`, type: 'BoxGeometry', args: [tw, 0.3, td], position: [0, SLAB + i * FLOOR_HEIGHT + 0.15, 0], material: 'concrete' })
+  }
+
+  const frameTop = SLAB + actualFloors * FLOOR_HEIGHT
+  const frameHeight = frameTop - SLAB
+  const frameMidY = SLAB + frameHeight / 2
+
+  groups.push({ name: 'structural_frame', type: 'BoxGeometry', args: [width, frameHeight, depth], position: [0, frameMidY, 0], material: 'steel' })
+  groups.push({ name: 'mep_layer', type: 'BoxGeometry', args: [width - 2, 0.8, depth - 2], position: [0, frameTop - 0.6, 0], material: 'mep' })
+  // Full-height glass curtain wall.
+  groups.push({ name: 'envelope_facade', type: 'BoxGeometry', args: [width + 0.2, frameHeight, 0.15], position: [0, frameMidY, depth / 2], material: 'glass' })
+  groups.push({ name: 'roof_form', type: 'BoxGeometry', args: [14, 0.4, 12], position: [0, frameTop + 0.2, 0], material: 'roofing' })
+  // Terrace decks at setback levels (every 8 floors).
+  for (let tier = 1; tier * 8 < actualFloors; tier++) {
+    const terY = SLAB + tier * 8 * FLOOR_HEIGHT
+    const terW = Math.max(14, width - (tier - 1) * 2)
+    const terD = Math.max(12, depth - (tier - 1) * 2)
+    groups.push({ name: `terrace_deck_${tier}`, type: 'BoxGeometry', args: [terW, 0.2, terD], position: [0, terY + 0.1, 0], material: 'landscape' })
+  }
+
+  return { buildingType, floors: actualFloors, groups, source: 'scaffold' }
+}
+
+function scaffoldSchool(buildingType: string, floors: number, width: number, depth: number): SceneGraph {
+  const groups: ModelGroup[] = []
+  const actualFloors = Math.min(floors, 4)
+
+  groups.push({ name: 'foundation_slab', type: 'BoxGeometry', args: [width + 0.6, SLAB, depth + 0.6], position: [0, SLAB / 2, 0], material: 'concrete' })
+
+  for (let i = 0; i < actualFloors; i++) {
+    groups.push({ name: `floor_plate_${i + 1}`, type: 'BoxGeometry', args: [width, 0.3, depth], position: [0, SLAB + i * FLOOR_HEIGHT + 0.15, 0], material: 'concrete' })
+  }
+
+  const frameTop = SLAB + actualFloors * FLOOR_HEIGHT
+  const frameHeight = frameTop - SLAB
+  const frameMidY = SLAB + frameHeight / 2
+
+  groups.push({ name: 'structural_frame', type: 'BoxGeometry', args: [width, frameHeight, depth], position: [0, frameMidY, 0], material: 'concrete' })
+  groups.push({ name: 'mep_layer', type: 'BoxGeometry', args: [width - 1.5, 0.8, depth - 1.5], position: [0, frameTop - 0.6, 0], material: 'mep' })
+  groups.push({ name: 'envelope_facade', type: 'BoxGeometry', args: [width + 0.2, frameHeight, 0.2], position: [0, frameMidY, depth / 2], material: 'glass' })
+  groups.push({ name: 'roof_form', type: 'BoxGeometry', args: [width, 0.4, depth], position: [0, frameTop + 0.2, 0], material: 'roofing' })
+  // Secondary wing offset to the side.
+  const wingH = 2 * FLOOR_HEIGHT
+  groups.push({ name: 'secondary_wing', type: 'BoxGeometry', args: [26, wingH, 18], position: [width / 2 + 13, SLAB + wingH / 2, 0], material: 'concrete' })
+  // Gymnasium — single-storey large volume.
+  groups.push({ name: 'gymnasium_volume', type: 'BoxGeometry', args: [22, 8, 16], position: [-(width / 2 + 11), SLAB + 4, 0], material: 'concrete' })
+
+  return { buildingType, floors: actualFloors, groups, source: 'scaffold' }
+}
+
+function scaffoldHome(buildingType: string, floors: number, width: number, depth: number): SceneGraph {
+  const groups: ModelGroup[] = []
+  const actualFloors = Math.min(floors, 2)
+
+  groups.push({ name: 'foundation_slab', type: 'BoxGeometry', args: [width + 0.3, SLAB, depth + 0.3], position: [0, SLAB / 2, 0], material: 'concrete' })
+
+  for (let i = 0; i < actualFloors; i++) {
+    groups.push({ name: `floor_plate_${i + 1}`, type: 'BoxGeometry', args: [width, 0.25, depth], position: [0, SLAB + i * FLOOR_HEIGHT + 0.15, 0], material: 'concrete' })
+  }
+
+  const frameTop = SLAB + actualFloors * FLOOR_HEIGHT
+  const frameHeight = frameTop - SLAB
+  const frameMidY = SLAB + frameHeight / 2
+
+  groups.push({ name: 'structural_frame', type: 'BoxGeometry', args: [width, frameHeight, depth], position: [0, frameMidY, 0], material: 'concrete' })
+  groups.push({ name: 'mep_layer', type: 'BoxGeometry', args: [width - 1, 0.5, depth - 1], position: [0, frameTop - 0.4, 0], material: 'mep' })
+  groups.push({ name: 'envelope_facade', type: 'BoxGeometry', args: [width + 0.1, frameHeight, 0.15], position: [0, frameMidY, depth / 2], material: 'concrete' })
+  // Gable roof — two angled panels meeting at the ridge.
+  const ridgeY = frameTop + 2.5
+  groups.push({ name: 'roof_form', type: 'BoxGeometry', args: [width + 0.4, 0.2, depth + 0.4], rotation: [0.42, 0, 0], position: [0, ridgeY - 1, depth / 4], material: 'roofing' })
+  groups.push({ name: 'roof_form_rear', type: 'BoxGeometry', args: [width + 0.4, 0.2, depth + 0.4], rotation: [-0.42, 0, 0], position: [0, ridgeY - 1, -depth / 4], material: 'roofing' })
+  // Attached garage.
+  groups.push({ name: 'garage_volume', type: 'BoxGeometry', args: [6, 3, 6], position: [width / 2 + 3, SLAB + 1.5, 0], material: 'concrete' })
+
+  return { buildingType, floors: actualFloors, groups, source: 'scaffold' }
+}
+
+function scaffoldWarehouse(buildingType: string, floors: number, width: number, depth: number): SceneGraph {
+  const groups: ModelGroup[] = []
+  const actualFloors = Math.min(floors, 2)
+  const fh = 6 // warehouses have tall single floors
+
+  groups.push({ name: 'foundation_slab', type: 'BoxGeometry', args: [width + 0.6, SLAB, depth + 0.6], position: [0, SLAB / 2, 0], material: 'concrete' })
+
+  for (let i = 0; i < actualFloors; i++) {
+    groups.push({ name: `floor_plate_${i + 1}`, type: 'BoxGeometry', args: [width, 0.3, depth], position: [0, SLAB + i * fh + 0.15, 0], material: 'concrete' })
+  }
+
+  const frameTop = SLAB + actualFloors * fh
+  const frameHeight = frameTop - SLAB
+  const frameMidY = SLAB + frameHeight / 2
+
+  groups.push({ name: 'structural_frame', type: 'BoxGeometry', args: [width, frameHeight, depth], position: [0, frameMidY, 0], material: 'steel' })
+  groups.push({ name: 'mep_layer', type: 'BoxGeometry', args: [width - 2, 1.2, depth - 2], position: [0, frameTop - 0.8, 0], material: 'mep' })
+  groups.push({ name: 'envelope_facade', type: 'BoxGeometry', args: [width + 0.2, frameHeight, 0.2], position: [0, frameMidY, depth / 2], material: 'concrete' })
+  // Barrel ridge roof.
+  groups.push({ name: 'roof_form', type: 'CylinderGeometry', args: [width / 2, width / 2, depth, 8, 1], position: [0, frameTop + 1, 0], rotation: [0, Math.PI / 2, 0], material: 'roofing' })
+  // Loading dock at the rear.
+  groups.push({ name: 'loading_dock', type: 'BoxGeometry', args: [14, 4, 6], position: [0, SLAB + 2, -(depth / 2 + 3)], material: 'concrete' })
+
+  return { buildingType, floors: actualFloors, groups, source: 'scaffold' }
 }
 
 /**

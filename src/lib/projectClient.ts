@@ -71,5 +71,20 @@ export const projectClient = {
     title: string
     stage?: string
     reference?: string
+    pdfDataUrl?: string
   }) => postJson<unknown>('/api/agents/compliance/solve', body),
+
+  /** Auto-solve a compliance item: runs the agent AND generates a compliance PDF certificate. */
+  autosolve: (body: {
+    projectId: string
+    stage: string
+    stageTitle: string
+    item: string
+    agent: string
+    idea?: string
+  }) =>
+    postJson<{ answer: string; pdfDataUrl: string; items: string[] }>(
+      '/api/agents/autosolve',
+      body,
+    ),
 }

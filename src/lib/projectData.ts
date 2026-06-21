@@ -25,6 +25,7 @@ export interface SolvedCompliance {
   title: string
   stage: string
   reference?: string
+  pdfDataUrl?: string
 }
 
 export interface DailyLog {
@@ -154,6 +155,7 @@ export async function addSolvedCompliance(
   title: string,
   stage: string,
   reference?: string,
+  pdfDataUrl?: string,
 ): Promise<ProjectData> {
   const data = await readProjectData(id)
   if (!data.solvedCompliance.some((s) => s.title === title)) {
@@ -163,6 +165,7 @@ export async function addSolvedCompliance(
       title,
       stage,
       reference,
+      pdfDataUrl,
     })
     await writeProjectData(data)
   }

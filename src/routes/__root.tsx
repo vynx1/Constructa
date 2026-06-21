@@ -3,6 +3,7 @@ import {
   Outlet,
   Scripts,
   createRootRouteWithContext,
+  Link,
 } from '@tanstack/react-router'
 import { QueryClientProvider, type QueryClient } from '@tanstack/react-query'
 import type { ReactNode } from 'react'
@@ -14,7 +15,45 @@ interface RouterContext {
   queryClient: QueryClient
 }
 
+function NotFound() {
+  return (
+    <main
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        justifyContent: 'center',
+        minHeight: 'calc(100vh - 57px)',
+        gap: '1rem',
+        fontFamily: 'var(--font-sans, sans-serif)',
+        color: 'var(--ink-dark, #e2e8f0)',
+        background: 'var(--bg-dark, #0b0f14)',
+      }}
+    >
+      <span style={{ fontSize: '3rem', lineHeight: 1 }}>404</span>
+      <p style={{ margin: 0, color: 'var(--ink-soft-dark, #94a3b8)' }}>
+        This page doesn't exist.
+      </p>
+      <Link
+        to="/"
+        style={{
+          padding: '0.4rem 1rem',
+          borderRadius: '8px',
+          background: 'var(--teal, #01696f)',
+          color: '#fff',
+          textDecoration: 'none',
+          fontSize: '0.85rem',
+          fontWeight: 600,
+        }}
+      >
+        Back to home
+      </Link>
+    </main>
+  )
+}
+
 export const Route = createRootRouteWithContext<RouterContext>()({
+  notFoundComponent: NotFound,
   head: () => ({
     meta: [
       { charSet: 'utf-8' },
