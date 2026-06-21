@@ -279,6 +279,22 @@ export async function scrapeRawListingCards(
   return collected
 }
 
+// Page-INDEPENDENT fast path: verify a card's inline images without touching the
+// browser page. Safe to run in parallel across many cards (Task 2 efficiency:
+// we pre-verify all cards concurrently, then only page-bound fallbacks stay
+// serial). Returns needsFallback=true when inline images don't verify.
+export async function verifyCardInlineImages(
+  card: RawListingCard,
+): Promise<{ images: string[]; imageUnavailable: boolean; needsFallback: boolean }> {
+  const { verified } = await verifyListingImages(
+    card.images,
+    card.sourceSite,
+    card.sourcePageUrl,
+  )
+  if (verified.length) return { images: verified, imageUnavailable: false, needsFallback: false }
+  return { images: [], imageUnavailable: true, needsFallback: true }
+}
+
 export async function hydrateCardImages(
   page: any,
   card: RawListingCard,

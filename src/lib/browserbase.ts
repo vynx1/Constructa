@@ -11,6 +11,7 @@ import { withBrowserbasePage, hasBrowserbaseKey } from '~/lib/browserbaseCore'
 import {
   scrapeRawListingCards,
   hydrateCardImages,
+  verifyCardInlineImages,
   regionContextFor,
   type RawListingCard,
 } from '~/lib/imageScraper'
@@ -152,10 +153,26 @@ async function scrapeRegionListings(
   const listings: LandListing[] = []
   const seen = new Set<string>()
 
-  for (let i = 0; i < raw.length && listings.length < 8; i++) {
-    const card = raw[i]!
+  // EFFICIENCY (Task 2): the per-card image VERIFICATION is page-independent
+  // (network reachability + vision gate), so verify every candidate card's
+  // inline images CONCURRENTLY first. Only cards whose inline images fail
+  // verification fall through to the page-bound fallbacks (Zillow gallery /
+  // DDG ZIP search), which must stay serial on the single shared page. This
+  // collapses the dominant wall-time cost from O(n) sequential to ~O(1).
+  const consider = raw.slice(0, 16)
+  const fastPacks = await Promise.all(
+    consider.map((card) => verifyCardInlineImages(card).catch(() => null)),
+  )
+
+  for (let i = 0; i < consider.length && listings.length < 8; i++) {
+    const card = consider[i]!
     const zipForFallback = card.text.match(/\b(\d{5})\b/)?.[1] ?? primaryZip
-    const imagePack = await hydrateCardImages(page, card, zipForFallback, city)
+    const fast = fastPacks[i]
+    // Fast path: inline images already verified in parallel above.
+    const imagePack =
+      fast && !fast.needsFallback
+        ? { images: fast.images, imageUnavailable: fast.imageUnavailable }
+        : await hydrateCardImages(page, card, zipForFallback, city)
     const listing = cardToListing(
       card,
       retagRegionId,

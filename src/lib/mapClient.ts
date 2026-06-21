@@ -107,6 +107,8 @@ export interface BusinessPartner {
   category: string
   rating: number
   reviewCount: number
+  conviction?: number
+  logoWidth?: number
   topReview?: string
   phone?: string
   website?: string
