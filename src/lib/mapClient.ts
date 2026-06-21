@@ -101,6 +101,30 @@ export interface RegionDeepDive {
   live: boolean
 }
 
+export interface BusinessPartner {
+  id: string
+  name: string
+  category: string
+  rating: number
+  reviewCount: number
+  topReview?: string
+  phone?: string
+  website?: string
+  address?: string
+  logo?: string
+  mapsUrl?: string
+  sourceSite: string
+  scrapedAt: string
+}
+
+export interface PartnersPage {
+  regionId: string
+  partners: BusinessPartner[]
+  nextCursor: number | null
+  total: number
+  live: boolean
+}
+
 async function getJson<T>(url: string): Promise<T> {
   const res = await fetch(url)
   if (!res.ok) throw new Error(`${url} -> ${res.status}`)
@@ -145,6 +169,20 @@ export const mapClient = {
       body: JSON.stringify({}),
     })
     if (!res.ok) throw new Error(`region deep-dive ${res.status}`)
+    return res.json()
+  },
+
+  // Local Partners: BrowserBase contractor/business list, cursor-paginated.
+  partners: async (
+    regionId: string,
+    cursor = 0,
+    opts: { live?: boolean } = {},
+  ): Promise<PartnersPage> => {
+    const res = await fetch(
+      `/api/map/region/${regionId}/partners?cursor=${cursor}`,
+      { headers: { 'x-live-mode': opts.live ? 'true' : 'false' } },
+    )
+    if (!res.ok) throw new Error(`region partners ${res.status}`)
     return res.json()
   },
 

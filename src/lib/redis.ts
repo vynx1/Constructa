@@ -54,4 +54,6 @@ export const keys = {
   regionListings: (id: string) => `map:region:${id}:listings`,
   // liked:plots              -> Hash: { listingId: JSON } saved by the user
   likedPlots: () => `liked:plots`,
+  // map:region:{id}:partners -> JSON: BrowserBase local contractor/business list
+  regionPartners: (id: string) => `map:region:${id}:partners`,
 } as const

@@ -1,4 +1,6 @@
 import { useNavigate } from '@tanstack/react-router'
+import { useState } from 'react'
+import { LocalPartnersPanel } from './LocalPartnersPanel'
 import { Heart, Zap } from 'lucide-react'
 import { scoreColorCss, type LandListing, type RegionDeepDive } from '~/lib/mapClient'
 import { PlotCarousel } from './PlotCarousel'
@@ -38,6 +40,7 @@ export function DeepDiveResearchPanel({
   likedCount,
 }: Props) {
   const navigate = useNavigate()
+  const [activeTab, setActiveTab] = useState<'listings' | 'partners'>('listings')
   const guide = data?.guide
   const verdict = guide ? VERDICT_META[guide.recommendation.verdict] ?? VERDICT_META.hold : null
 
@@ -103,18 +106,40 @@ export function DeepDiveResearchPanel({
           <div className="deep-dive__grid">
             {/* LEFT — land plots carousel */}
             <div className="deep-dive__col">
-              <h3 className="deep-dive__col-title">Land &amp; Plots For Sale</h3>
-              {loading && !data ? (
-                <div className="carousel carousel--skeleton">
-                  <div className="skeleton-card skeleton-card--lg" />
-                  <p className="deep-dive__loading-text">Browserbase indexing parcels…</p>
-                </div>
+              <div className="partner-tabs" role="tablist">
+                <button
+                  role="tab"
+                  className={`partner-tab${activeTab === 'listings' ? ' partner-tab--active' : ''}`}
+                  aria-selected={activeTab === 'listings'}
+                  onClick={() => setActiveTab('listings')}
+                >
+                  Land &amp; Plots
+                </button>
+                <button
+                  role="tab"
+                  className={`partner-tab${activeTab === 'partners' ? ' partner-tab--active' : ''}`}
+                  aria-selected={activeTab === 'partners'}
+                  onClick={() => setActiveTab('partners')}
+                >
+                  Local Partners
+                </button>
+              </div>
+
+              {activeTab === 'listings' ? (
+                loading && !data ? (
+                  <div className="carousel carousel--skeleton">
+                    <div className="skeleton-card skeleton-card--lg" />
+                    <p className="deep-dive__loading-text">Browserbase indexing parcels…</p>
+                  </div>
+                ) : (
+                  <PlotCarousel
+                    listings={data?.listings ?? []}
+                    likedIds={likedIds}
+                    onToggleLike={onToggleLike}
+                  />
+                )
               ) : (
-                <PlotCarousel
-                  listings={data?.listings ?? []}
-                  likedIds={likedIds}
-                  onToggleLike={onToggleLike}
-                />
+                <LocalPartnersPanel regionId={regionId} live={live} />
               )}
             </div>
 
