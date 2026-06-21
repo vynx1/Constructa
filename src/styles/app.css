@@ -109,27 +109,6 @@ body:has(.map-page-v2) {
   background: linear-gradient(135deg, var(--glow-cyan), var(--accent-warm));
   box-shadow: 0 0 10px rgba(34, 211, 238, 0.55);
 }
-.nav__status {
-  display: none;
-  align-items: center;
-  gap: 0.45rem;
-  font-size: 0.62rem;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: var(--ink-soft-dark);
-}
-.nav__status-dot {
-  width: 0.4rem;
-  height: 0.4rem;
-  border-radius: 999px;
-  background: #34d399;
-  box-shadow: 0 0 8px rgba(52, 211, 153, 0.7);
-  animation: status-pulse 2.4s ease-in-out infinite;
-}
-@keyframes status-pulse {
-  0%, 100% { opacity: 1; transform: scale(1); }
-  50% { opacity: 0.65; transform: scale(0.92); }
-}
 .nav__links {
   display: flex;
   align-items: center;
@@ -146,11 +125,6 @@ body:has(.map-page-v2) {
 }
 .nav__cta {
   margin-left: 0.25rem;
-}
-@media (min-width: 768px) {
-  .nav__status {
-    display: inline-flex;
-  }
 }
 
 /* --- Buttons ------------------------------------------------------------- */
@@ -246,6 +220,13 @@ body:has(.map-page-v2) {
 }
 .section__title--wide {
   max-width: none;
+}
+
+/* Landing: neutral static labels; cyan reserved for animations/chrome */
+.landing .section__eyebrow,
+.landing .feature__kicker,
+.landing .compliance-explorer__tag {
+  color: var(--ink-soft);
 }
 
 /* --- Section divider (data band) ----------------------------------------- */
@@ -1365,6 +1346,13 @@ body:has(.map-page-v2) {
   border-top: 1px solid var(--line);
   background: linear-gradient(180deg, var(--bg) 0%, #e8edf4 100%);
 }
+.demo-section__cta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
+  margin-top: 1.25rem;
+}
 .demo-shell__header {
   display: flex;
   flex-wrap: wrap;
@@ -1522,9 +1510,6 @@ body:has(.map-page-v2) {
       rgba(11, 15, 20, 0.55) 45%,
       rgba(11, 15, 20, 0.25) 100%
     );
-  }
-  .nav__status {
-    display: none;
   }
 }
 
@@ -2379,6 +2364,17 @@ body:has(.map-page-v2) {
   text-transform: uppercase;
   letter-spacing: 0.05em;
 }
+.verdict-banner__score-compare {
+  margin: 0 0 0.35rem;
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  color: var(--ink-soft);
+}
+.verdict-banner__scores {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
 .verdict-banner__score {
   display: flex;
   flex-direction: column;
@@ -2388,6 +2384,12 @@ body:has(.map-page-v2) {
   padding: 0.6rem;
   border: 2px solid var(--line);
   border-radius: 14px;
+}
+.verdict-banner__score--quick span {
+  font-size: 1.35rem;
+}
+.verdict-banner__score--depth span {
+  font-size: 2rem;
 }
 .verdict-banner__score span {
   font-size: 2rem;

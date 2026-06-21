@@ -89,7 +89,7 @@ export function PropertyInsightCards({ cached }: { cached: CachedDeepDive | null
           <span style={{ color: scoreColorCss(guide.consensusScore) }}>
             {guide.consensusScore}
           </span>
-          <small>consensus</small>
+          <small>In-depth score</small>
         </div>
       </header>
 

@@ -2,7 +2,7 @@ import { useNavigate } from '@tanstack/react-router'
 import { useState } from 'react'
 import { LocalPartnersPanel } from './LocalPartnersPanel'
 import { Heart, Zap } from 'lucide-react'
-import { scoreColorCss, type LandListing, type RegionDeepDive } from '~/lib/mapClient'
+import { scoreColorCss, guideInDepthScore, districtQuickScore, type LandListing, type RegionDeepDive } from '~/lib/mapClient'
 import { PlotCarousel } from './PlotCarousel'
 import { FactorScale } from './FactorScale'
 
@@ -42,6 +42,8 @@ export function DeepDiveResearchPanel({
   const navigate = useNavigate()
   const [activeTab, setActiveTab] = useState<'listings' | 'partners'>('listings')
   const guide = data?.guide
+  const quickScore = data ? districtQuickScore(data.region) : null
+  const inDepthScore = guide ? guideInDepthScore(guide) : null
   const verdict = guide ? VERDICT_META[guide.recommendation.verdict] ?? VERDICT_META.hold : null
 
   return (
@@ -87,18 +89,32 @@ export function DeepDiveResearchPanel({
               <div className="verdict-banner__body">
                 <strong>{guide.recommendation.headline}</strong>
                 <p>{guide.recommendation.reasoning}</p>
+                {quickScore != null && inDepthScore != null && quickScore !== inDepthScore && (
+                  <p className="verdict-banner__score-compare">
+                    Quick-Score {quickScore} → In-depth {inDepthScore} after analysis
+                  </p>
+                )}
                 <span className="verdict-banner__src">
                   Synthesized by ASI:One{data?.live ? ' · live' : ''} · via {guide.source}
                 </span>
               </div>
-              <div
-                className="verdict-banner__score"
-                style={{ borderColor: scoreColorCss(guide.consensusScore) }}
-              >
-                <span style={{ color: scoreColorCss(guide.consensusScore) }}>
-                  {guide.consensusScore}
-                </span>
-                <small>consensus</small>
+              <div className="verdict-banner__scores">
+                {quickScore != null && (
+                  <div
+                    className="verdict-banner__score verdict-banner__score--quick"
+                    style={{ borderColor: scoreColorCss(quickScore) }}
+                  >
+                    <span style={{ color: scoreColorCss(quickScore) }}>{quickScore}</span>
+                    <small>Quick-Score</small>
+                  </div>
+                )}
+                <div
+                  className="verdict-banner__score verdict-banner__score--depth"
+                  style={{ borderColor: scoreColorCss(inDepthScore!) }}
+                >
+                  <span style={{ color: scoreColorCss(inDepthScore!) }}>{inDepthScore}</span>
+                  <small>In-depth score</small>
+                </div>
               </div>
             </div>
           )}

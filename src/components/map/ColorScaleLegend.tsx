@@ -13,7 +13,7 @@ export function ColorScaleLegend({ extent, mode, className = '' }: Props) {
   return (
     <div className={`heat-legend heat-legend--dark ${className}`.trim()}>
       <span className="heat-legend__title">
-        {mode === 'national' ? 'Relative suitability · US' : 'Relative suitability · state'}
+        {mode === 'national' ? 'State score · US' : 'District Quick-Score · state'}
       </span>
       <div
         className="heat-legend__bar"

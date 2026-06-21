@@ -234,6 +234,7 @@ map.get('/state/:code/congressional-districts', async (c) => {
         properties: {
           ...f.properties,
           score: scoreById[f.properties.id] ?? 50,
+          quickScore: scoreById[f.properties.id] ?? 50,
         },
       })),
     }

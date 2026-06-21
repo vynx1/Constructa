@@ -1,7 +1,7 @@
-import { scoreColorCss, type CongressRegion } from '~/lib/mapClient'
+import { scoreColorCss, districtQuickScore, type CongressRegion } from '~/lib/mapClient'
 
 // Master plan §2A — floating action drawer at STATE level, scoped to a selected
-// congressional region. Shows the region consensus score + zips and the CTA
+// congressional region. Shows the district Quick-Score + zips and the CTA
 // that triggers the async deep-dive + smooth-scroll to the research panel.
 
 interface Props {
@@ -11,7 +11,7 @@ interface Props {
 }
 
 export function FloatingActionDrawer({ region, isExploring, onExplore }: Props) {
-  const score = region.score
+  const quickScore = districtQuickScore(region)
   return (
     <div className="action-drawer">
       <div className="action-drawer__head">
@@ -23,10 +23,10 @@ export function FloatingActionDrawer({ region, isExploring, onExplore }: Props) 
         </div>
         <div
           className="action-drawer__score"
-          style={{ borderColor: scoreColorCss(score) }}
+          style={{ borderColor: scoreColorCss(quickScore) }}
         >
-          <span style={{ color: scoreColorCss(score) }}>{score}</span>
-          <small>consensus</small>
+          <span style={{ color: scoreColorCss(quickScore) }}>{quickScore}</span>
+          <small>Quick-Score</small>
         </div>
       </div>
 

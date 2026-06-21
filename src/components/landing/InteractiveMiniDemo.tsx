@@ -1,3 +1,4 @@
+import { Link } from '@tanstack/react-router'
 import { CheckCircle2, Zap } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { DemoBuildCanvas, DEMO_VIEW_HEIGHT } from '~/components/landing/DemoBuildCanvas'
@@ -41,25 +42,25 @@ const PHASE_OFFSET = {
 
 const COMPLIANCE_BADGES = [
   {
-    id: 'ceqa',
-    label: 'CEQA',
+    id: 'env',
+    label: 'Environmental review',
     step: 1,
     description:
-      'California Environmental Quality Act — reviews site impacts before grading begins.',
+      'Federal and state environmental review — site impacts screened before grading begins.',
   },
   {
-    id: 'title24',
-    label: 'Title 24',
+    id: 'energy',
+    label: 'Energy code',
     step: 2,
     description:
       'Energy code compliance for envelope, retail systems, and rooftop solar output.',
   },
   {
-    id: 'dsa',
-    label: 'DSA',
+    id: 'inspect',
+    label: 'Building inspections',
     step: 3,
     description:
-      'Division of the State Architect — structural and accessibility inspection gates.',
+      'Local authority inspections — structural and accessibility gates scheduled in sequence.',
   },
 ] as const
 
@@ -84,7 +85,7 @@ function EnergyComplianceTab({ visible }: { visible: boolean }) {
         </div>
         <div className="space-y-2 px-3.5 py-3">
           <p className="m-0 text-[0.72rem] leading-relaxed text-[#8b9aab]">
-            Generated to meet Title 24 mixed-use standards — retail base load,
+            Generated to meet national mixed-use energy standards — retail base load,
             residential envelope, and rooftop PV sized as one integrated system.
           </p>
           <ul className="m-0 list-none space-y-1.5 p-0 text-[0.68rem] leading-snug text-[#c8d0dc]">
@@ -102,7 +103,7 @@ function EnergyComplianceTab({ visible }: { visible: boolean }) {
             </li>
             <li className="flex gap-2">
               <span className="text-emerald-400">✓</span>
-              <span>Title 24 Part 6 documentation auto-filed at each build phase</span>
+              <span>Energy code documentation auto-filed at each build phase</span>
             </li>
           </ul>
         </div>
@@ -353,8 +354,8 @@ export function InteractiveMiniDemo() {
   const typingComplete = typedText.length >= PROMPT_TEXT.length
   const workspaceHeader =
     phase === 'map'
-      ? 'Southwest parcel mesh · San Diego sector'
-      : 'Parcel #042-SD-CA // Initialization'
+      ? 'Southwest parcel mesh · District 12'
+      : 'Parcel #042-US // Initialization'
 
   return (
     <section className="demo-section reveal-section" aria-label="Interactive product demo">
@@ -436,6 +437,15 @@ export function InteractiveMiniDemo() {
             </div>
           </div>
         </HudFrame>
+
+        <div className="demo-section__cta">
+          <Link to="/map" className="btn btn--ghost">
+            Go to map
+          </Link>
+          <Link to="/product" className="btn btn--primary">
+            Launch
+          </Link>
+        </div>
       </div>
     </section>
   )

@@ -9,11 +9,6 @@ export function SiteNav() {
           Constructa
         </Link>
 
-        <div className="nav__status font-mono" aria-live="polite">
-          <span className="nav__status-dot" aria-hidden />
-          6 agents active · CA compliance online
-        </div>
-
         <div className="nav__links">
           <Link to="/map" className="nav__link">
             Map

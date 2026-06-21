@@ -50,7 +50,7 @@ export const MARKETS: Market[] = [
     lon: -122.42,
     lat: 37.77,
     pressure: 0.78,
-    stats: { permits: '+9% YoY', landTrend: '$430/sqft', note: 'CEQA-heavy, high upside' },
+    stats: { permits: '+9% YoY', landTrend: '$430/sqft', note: 'High regulation, strong upside' },
   },
   {
     id: 'la',
@@ -58,7 +58,7 @@ export const MARKETS: Market[] = [
     lon: -118.24,
     lat: 34.05,
     pressure: 0.84,
-    stats: { permits: '+18% YoY', landTrend: '$365/sqft', note: 'SB-9 lot splits surging' },
+    stats: { permits: '+18% YoY', landTrend: '$365/sqft', note: 'Infill lot splits surging' },
   },
   {
     id: 'phx',

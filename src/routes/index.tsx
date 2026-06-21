@@ -57,9 +57,9 @@ function LandingPage() {
               Build faster where the&nbsp;rules are hardest.
             </h1>
             <p className="hero__sub max-w-max">
-              Constructa turns California’s tangle of compliance regimes into
-              something autonomous agents collect, classify, and file — so the
-              only bottleneck left is how fast you can pour.
+              The build is the easy part. The permits never stop. Constructa's
+              agents track what's due, prep your filings, and keep compliance
+              moving—so work doesn't stall waiting on paperwork.
             </p>
 
             <div className="hero__cta">
@@ -72,10 +72,10 @@ function LandingPage() {
             </div>
 
             <div className="hero__proof font-mono">
-              <span>Cal/OSHA</span>
-              <span>Title 24</span>
-              <span>CEQA</span>
-              <span>DSA</span>
+              <span>OSHA</span>
+              <span>Energy code</span>
+              <span>Environmental review</span>
+              <span>Building code</span>
               <span>SWPPP</span>
             </div>
           </div>

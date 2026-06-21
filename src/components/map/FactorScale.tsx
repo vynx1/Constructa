@@ -26,7 +26,7 @@ export function FactorScale({ factors }: Props) {
     <div className="factor-scale">
       <div className="factor-scale__legend">
         <Cpu size={12} /> Each factor is computed by a dedicated Agentverse agent,
-        then fused by ASI:One into the consensus score.
+        then fused by ASI:One into the in-depth score.
       </div>
 
       {factors.map((f) => {

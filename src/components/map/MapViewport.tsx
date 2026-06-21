@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { DeckGL } from '@deck.gl/react'
-import { GeoJsonLayer, TextLayer } from '@deck.gl/layers'
-import { geoCentroid } from 'd3-geo'
+import { GeoJsonLayer } from '@deck.gl/layers'
 import {
   FlyToInterpolator,
   WebMercatorViewport,
@@ -10,10 +9,10 @@ import {
 import {
   mapClient,
   colorForScore,
+  districtQuickScore,
   type CongressRegion,
   type StateScore,
 } from '~/lib/mapClient'
-import { scoreToGrade } from '~/lib/mapScores'
 import { geometryBBox } from '~/lib/geo'
 import { FloatingActionDrawer } from './FloatingActionDrawer'
 import { ColorScaleLegend } from './ColorScaleLegend'
@@ -220,34 +219,6 @@ export function MapViewport({ onExplore, activeRegion }: Props) {
             zoomLevel === 'NATIONAL' && info.object && enterState(info.object),
         }),
       )
-
-      // Letter grade stamped at each state's centroid (national view only).
-      if (zoomLevel === 'NATIONAL') {
-        out.push(
-          new TextLayer({
-            id: 'state-grades',
-            data: statesGeo.features,
-            pickable: false,
-            getPosition: (f: any) => geoCentroid(f) as [number, number],
-            getText: (f: any) => {
-              const sc = scoreForFeature(f)
-              return sc == null ? '' : scoreToGrade(sc)
-            },
-            getSize: 17,
-            sizeUnits: 'pixels',
-            getColor: [248, 250, 252, 240],
-            getTextAnchor: 'middle',
-            getAlignmentBaseline: 'center',
-            fontFamily: 'JetBrains Mono, ui-monospace, monospace',
-            fontWeight: 700,
-            fontSettings: { sdf: true },
-            outlineWidth: 3,
-            outlineColor: [8, 11, 16, 230],
-            billboard: true,
-            updateTriggers: { getText: [scores] },
-          }),
-        )
-      }
     }
 
     if (zoomLevel === 'STATE' && countyGeo?.features?.length) {
@@ -339,12 +310,12 @@ export function MapViewport({ onExplore, activeRegion }: Props) {
           if (zoomLevel === 'NATIONAL' && object?.properties?.name) {
             const score = scoreForFeature(object)
             return {
-              text: `${object.properties.name} — grade ${score == null ? 'n/a' : scoreToGrade(score)}`,
+              text: `${object.properties.name} — score ${score == null ? 'n/a' : score}`,
             }
           }
           if (zoomLevel === 'STATE' && object?.properties?.label) {
             return {
-              text: `${object.properties.label} — consensus ${object.properties.score}`,
+              text: `${object.properties.label} — Quick-Score ${object.properties.score}`,
             }
           }
           return null
@@ -391,8 +362,8 @@ export function MapViewport({ onExplore, activeRegion }: Props) {
       {zoomLevel === 'STATE' && !loadingState && (
         <div className="map-region-help map-region-help--dark">
           {selectedDistrict
-            ? `${selectedDistrict.label} — score ${selectedDistrict.score} · Explore for land listings`
-            : 'Click a congressional district to inspect its property score'}
+            ? `${selectedDistrict.label} — Quick-Score ${districtQuickScore(selectedDistrict)} · Explore for in-depth analysis`
+            : 'Click a congressional district to see its Quick-Score'}
         </div>
       )}
 

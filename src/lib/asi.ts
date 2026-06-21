@@ -180,9 +180,13 @@ function mockGuide(districtId: string, compressed: string, baseScore?: number): 
   const verdict: BuyRecommendation['verdict'] =
     base >= 75 ? 'buy' : base >= 55 ? 'hold' : 'avoid'
 
+  const consensusScore = Math.round(
+    factors.reduce((sum, f) => sum + f.score, 0) / factors.length,
+  )
+
   return {
     district: districtId,
-    consensusScore: base,
+    consensusScore,
     recommendation: {
       verdict,
       headline:

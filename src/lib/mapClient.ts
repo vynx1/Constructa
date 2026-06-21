@@ -16,6 +16,7 @@ export {
 export interface StateScore {
   code: string
   name: string
+  /** State-level score on the national map. */
   aggregateScore: number
   regulatoryDensity: number
   districts: string[]
@@ -33,6 +34,7 @@ export interface CongressRegion {
   code: string
   index: number
   label: string
+  /** Instant Quick-Score shown on the map before deep-dive analysis. */
   score: number
   center: [number, number]
   xMin: number
@@ -85,6 +87,7 @@ export interface BuyingGuide {
   district: string
   recommendation: BuyRecommendation
   factors: GuideFactor[]
+  /** In-depth score after ASI / Agentverse factor analysis. */
   consensusScore: number
   zoning: string
   permits: string
@@ -125,6 +128,16 @@ export interface PartnersPage {
   nextCursor: number | null
   total: number
   live: boolean
+}
+
+/** Quick-Score on the map (pre-analysis). */
+export function districtQuickScore(region: CongressRegion): number {
+  return region.score
+}
+
+/** In-depth score from deep-dive analysis. */
+export function guideInDepthScore(guide: BuyingGuide): number {
+  return guide.consensusScore
 }
 
 async function getJson<T>(url: string): Promise<T> {
