@@ -1,6 +1,21 @@
 import { Hono } from 'hono'
 import { getRedis, keys } from '~/lib/redis'
 import { complete } from '~/lib/claude'
+import {
+  STATE_SCORES,
+  getDistrict,
+  districtsForState,
+} from '~/lib/mapData'
+import {
+  generateStateCells,
+  generateStateRegions,
+  hasStateMeta,
+} from '~/lib/mapGeo'
+import {
+  executeBrowserbaseScrapePipeline,
+  scrapeLandListings,
+} from '~/lib/browserbase'
+import { generateLandBuyingGuide, seededGuide } from '~/lib/asi'
 
 // ---------------------------------------------------------------------------
 // Web API (Hono), mounted inside TanStack Start via `src/routes/api/$.ts`.
@@ -20,11 +35,236 @@ export const api = new Hono().basePath('/api')
 api.get('/health', (c) => c.json({ ok: true, service: 'Construca-web-api' }))
 
 // --- Map (read-only, cache-backed) -----------------------------------------
+// Implements the interactive-map data plane (master plan §1 phases 1–2 + §3A).
+// All reads serve from Redis when present, else from the seeded mock cache, so
+// the map renders identically with or without infrastructure.
 const map = new Hono()
 
-map.get('/states', (c) =>
-  c.json({ source: 'cache', features: [], note: 'national heatmap data' }),
-)
+// Phase 1 — Regional Heatmap. National state-level aggregate scores.
+// Redis key: map:state:{code}
+map.get('/states', async (c) => {
+  const redis = getRedis()
+  const states = await Promise.all(
+    Object.values(STATE_SCORES).map(async (s) => {
+      if (redis) {
+        const h = await redis.hgetall(keys.mapState(s.code))
+        if (h && h.aggregate_score) {
+          return {
+            code: s.code,
+            name: s.name,
+            aggregateScore: Number(h.aggregate_score),
+            regulatoryDensity: Number(h.regulatory_density ?? s.regulatoryDensity),
+            districts: s.districts,
+          }
+        }
+      }
+      return s
+    }),
+  )
+  return c.json({ source: redis ? 'redis|seed' : 'seed', states })
+})
+
+// Phase 2 — District Focus. Drill into a state's metro-district groupings.
+map.get('/state/:code/districts', (c) => {
+  const code = c.req.param('code')
+  return c.json({ state: code, districts: districtsForState(code) })
+})
+
+// District-level detail (center, regional name, consensus score, cities).
+// Redis key: map:district:{id}
+map.get('/district/:id', async (c) => {
+  const id = c.req.param('id')
+  const redis = getRedis()
+  if (redis) {
+    const raw = await redis.get(keys.mapDistrict(id))
+    if (raw) return c.json({ source: 'redis', ...JSON.parse(raw) })
+  }
+  const d = getDistrict(id)
+  if (!d) return c.json({ error: 'unknown district', id }, 404)
+  const { grids, properties, guide, ...meta } = d
+  void grids
+  void properties
+  void guide
+  return c.json({ source: 'seed', ...meta })
+})
+
+// District micro-grid cells for the spatial-smoothing heatmap.
+// Redis key: map:district:{id}:grids
+map.get('/district/:id/grids', async (c) => {
+  const id = c.req.param('id')
+  const redis = getRedis()
+  if (redis) {
+    const raw = await redis.get(keys.mapDistrictGrids(id))
+    if (raw) return c.json({ source: 'redis', id, grids: JSON.parse(raw) })
+  }
+  const d = getDistrict(id)
+  return c.json({ source: 'seed', id, grids: d?.grids ?? [] })
+})
+
+// Phase 3 + 4 — Automated Deep-Dive + Agent Consensus Summary.
+// Stage-Safe Mock Bridge (master plan §4): the `x-live-mode` header gates the
+// live Browserbase + ASI:One pass. Default (off) serves the frozen guide so a
+// presentation never stalls; any live failure degrades back to the same cache.
+map.post('/district/:id/deep-dive', async (c) => {
+  const id = c.req.param('id')
+  const d = getDistrict(id)
+  if (!d) return c.json({ error: 'unknown district', id }, 404)
+
+  const projectType =
+    (await c.req.json().catch(() => ({}))).projectType ?? 'mixed_use'
+  const liveMode = c.req.header('x-live-mode') === 'true'
+  const redis = getRedis()
+
+  // Instant presentation path — frozen, pre-generated record.
+  const frozen = async () => {
+    if (redis) {
+      const pre = await redis.get(keys.preGeneratedGuide(id))
+      if (pre) return JSON.parse(pre)
+    }
+    return {
+      district: id,
+      guide: { district: id, ...d.guide, consensusScore: d.aggregateConsensusScore, source: 'mock' },
+      properties: d.properties,
+      live: false,
+    }
+  }
+
+  if (!liveMode) return c.json(await frozen())
+
+  // Live execution path — real Browserbase gather + ASI:One evaluation.
+  try {
+    const scrape = await executeBrowserbaseScrapePipeline(id, projectType)
+    if (redis) {
+      // Persist raw scrapes for the session (master plan §3A).
+      await redis.del(keys.sessionRawScrapes(id))
+      if (scrape.blocks.length)
+        await redis.rpush(keys.sessionRawScrapes(id), ...scrape.blocks)
+    }
+    const guide = await generateLandBuyingGuide(id, scrape.blocks)
+    return c.json({
+      district: id,
+      guide,
+      properties: d.properties,
+      live: scrape.live,
+    })
+  } catch (err) {
+    console.error('[deep-dive] live pass failed, serving frozen:', err)
+    return c.json(await frozen())
+  }
+})
+
+// --- Granular zip-level heatmap (ask #2) ------------------------------------
+// Serves a dense cell grid for a state. Reads Redis first (map:state:{code}:cells)
+// so once real data is loaded the heatmap fills at high granularity; otherwise
+// generates the seeded grid. The frontend clips cells to the state outline.
+map.get('/state/:code/heatmap', async (c) => {
+  const code = c.req.param('code').toUpperCase()
+  const redis = getRedis()
+  if (redis) {
+    const raw = await redis.get(keys.mapStateCells(code))
+    if (raw) return c.json({ source: 'redis', code, cells: JSON.parse(raw) })
+  }
+  if (!hasStateMeta(code)) return c.json({ source: 'none', code, cells: [] })
+  return c.json({ source: 'seed', code, cells: generateStateCells(code) })
+})
+
+// --- Congressional regions for a state (ask #3) -----------------------------
+map.get('/state/:code/regions', async (c) => {
+  const code = c.req.param('code').toUpperCase()
+  const redis = getRedis()
+  if (redis) {
+    const raw = await redis.get(keys.mapStateRegions(code))
+    if (raw) return c.json({ source: 'redis', code, regions: JSON.parse(raw) })
+  }
+  return c.json({ source: 'seed', code, regions: generateStateRegions(code) })
+})
+
+// --- Region deep-dive: land listings + factor-scored buying guide -----------
+// Stage-safe: `x-live-mode: true` runs the live Browserbase + ASI:One pass;
+// otherwise (and on any failure) it serves the seeded/cached record.
+map.post('/region/:regionId/deep-dive', async (c) => {
+  const regionId = c.req.param('regionId')
+  const code = regionId.split('-r')[0] ?? ''
+  const region = generateStateRegions(code).find((r) => r.id === regionId)
+  if (!region) return c.json({ error: 'unknown region', regionId }, 404)
+
+  const liveMode = c.req.header('x-live-mode') === 'true'
+  const redis = getRedis()
+
+  // Stage-safe default: instant, deterministic, network-free seeded guide.
+  const frozen = async () => {
+    if (redis) {
+      const pre = await redis.get(keys.preGeneratedGuide(regionId))
+      if (pre) return JSON.parse(pre)
+    }
+    const { listings } = await scrapeLandListings(regionId)
+    return {
+      regionId,
+      region,
+      guide: seededGuide(regionId, region.score),
+      listings,
+      live: false,
+    }
+  }
+
+  if (!liveMode) return c.json(await frozen())
+
+  try {
+    // 1. Concrete land parcels for this region's zips.
+    const { listings, live: listLive } = await scrapeLandListings(regionId)
+    if (redis)
+      await redis.set(keys.regionListings(regionId), JSON.stringify(listings), 'EX', 7200)
+
+    // 2. Permit/zoning/sentiment scrape → compressed → ASI factor guide.
+    const scrape = await executeBrowserbaseScrapePipeline(regionId, 'mixed_use')
+    if (redis && scrape.blocks.length) {
+      await redis.del(keys.sessionRawScrapes(regionId))
+      await redis.rpush(keys.sessionRawScrapes(regionId), ...scrape.blocks)
+    }
+    const guide = await generateLandBuyingGuide(regionId, scrape.blocks)
+    return c.json({ regionId, region, guide, listings, live: listLive || scrape.live })
+  } catch (err) {
+    console.error('[region deep-dive] live failed, serving frozen:', err)
+    return c.json(await frozen())
+  }
+})
+
+// --- Liked plots (ask #5: save to Redis) ------------------------------------
+map.get('/liked', async (c) => {
+  const redis = getRedis()
+  if (!redis) return c.json({ liked: [], source: 'memory' })
+  const all = await redis.hgetall(keys.likedPlots())
+  return c.json({
+    liked: Object.values(all).map((v) => JSON.parse(v)),
+    source: 'redis',
+  })
+})
+
+map.post('/liked', async (c) => {
+  const listing = await c.req.json().catch(() => null)
+  if (!listing?.id) return c.json({ error: 'listing.id required' }, 400)
+  const redis = getRedis()
+  if (redis)
+    await redis.hset(keys.likedPlots(), listing.id, JSON.stringify(listing))
+  return c.json({ ok: true, id: listing.id, saved: Boolean(redis) })
+})
+
+map.delete('/liked/:id', async (c) => {
+  const id = c.req.param('id')
+  const redis = getRedis()
+  if (redis) await redis.hdel(keys.likedPlots(), id)
+  return c.json({ ok: true, id, removed: Boolean(redis) })
+})
+
+// Bonus live action: re-score a district on stage (BUILD_PLAN §4 "refresh").
+map.post('/district/:id/refresh', async (c) => {
+  const id = c.req.param('id')
+  const d = getDistrict(id)
+  if (!d) return c.json({ error: 'unknown district', id }, 404)
+  const scrape = await executeBrowserbaseScrapePipeline(id, 'mixed_use')
+  const guide = await generateLandBuyingGuide(id, scrape.blocks)
+  return c.json({ id, guide, live: scrape.live })
+})
 
 map.get('/county/:fips', async (c) => {
   const fips = c.req.param('fips')
