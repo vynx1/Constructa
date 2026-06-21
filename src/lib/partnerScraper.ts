@@ -1,22 +1,32 @@
-// ---------------------------------------------------------------------------
-// Local Partners — real contractor discovery (ASI + BrowserBase).
-//
-// Pipeline (master-plan stage-safe; degrades to mock at every step):
-//   1. DISCOVER  — BrowserBase scrapes DuckDuckGo HTML search for contractor
-//                  websites across the district's MAJOR ZIP codes (multiple
-//                  trades). Yields real business name + website + snippet.
-//   2. VET       — ASI:One quickly vets each name+link, filters out directories
-//                  / non-businesses, normalizes the name + category, and scores
-//                  a 0-100 "conviction" (quality/legitimacy). Highest first.
-//   3. ENRICH    — BrowserBase pulls Google reviews (rating + review count) and
-//                  contact info (phone, address) for the top vetted businesses.
-//   4. RANK      — conviction desc, then small-logo preference (favicons), then
-//                  review weight. Cached in Redis by the API; mock fallback.
-// ---------------------------------------------------------------------------
-
 import { withBrowserbasePage, gotoAndSettle, hasBrowserbaseKey } from '~/lib/browserbaseCore'
 import { regionContextFor } from '~/lib/imageScraper'
 import { asiComplete, hasAsiKey } from '~/lib/asi'
+
+// ---------------------------------------------------------------------------
+// Local Partners — REAL contractor discovery (multi-engine + direct sites).
+//
+// The previous version only queried DuckDuckGo HTML + Google Maps, both of
+// which are aggressively bot-blocked, so it silently fell back to mock data —
+// and the API layer then cached that mock as if it were live, serving stale
+// fake contractors forever.
+//
+// New pipeline (Browserbase Developer-plan features only: geo/residential
+// proxies + fingerprint stealth + ad-blocking + CDP; NO Enterprise
+// advancedStealth/captcha):
+//   1. DISCOVER  — for each major district ZIP × trade, run a real web search.
+//                  Engines tried in order until results appear:
+//                    Google (consent-cookie bypassed) → Bing → DuckDuckGo.
+//                  Extract organic result links, drop directories, dedupe host.
+//   2. VET       — ASI:One filters non-businesses, normalizes name+category,
+//                  scores 0-100 conviction. Highest first.
+//   3. ENRICH    — visit each top contractor's OWN website over CDP and scrape
+//                  phone / email / clean name / logo (reliable, no bot wall).
+//                  Google Maps used only as a secondary rating source.
+//   4. RANK      — conviction → small-logo preference → review weight.
+//
+// scrapeLocalPartners now returns { partners, live }. live=false means we fell
+// back to mock — the API uses this to NEVER cache mock data.
+// ---------------------------------------------------------------------------
 
 export interface BusinessPartner {
   id: string
@@ -27,13 +37,19 @@ export interface BusinessPartner {
   conviction: number // 0-100, ASI quality/legitimacy score
   topReview?: string
   phone?: string
+  email?: string
   website?: string
   address?: string
-  logo?: string // small favicon logo
+  logo?: string
   logoWidth?: number
   mapsUrl?: string
   sourceSite: string
   scrapedAt: string
+}
+
+export interface PartnerScrapeResult {
+  partners: BusinessPartner[]
+  live: boolean
 }
 
 interface RawCandidate {
@@ -51,7 +67,6 @@ interface VetResult {
   conviction: number
 }
 
-// Trades to search for across each ZIP. Kept tight to bound search cost.
 const DISCOVERY_QUERIES = [
   'general contractor',
   'excavation contractor',
@@ -59,20 +74,21 @@ const DISCOVERY_QUERIES = [
   'land surveyor',
   'home builder',
 ]
-const MAX_ZIPS = 3 // major ZIP codes per district to search
-const MAX_SEARCHES = 12 // hard cap on DDG queries per session
-const RESULTS_PER_SEARCH = 6
-const MAX_CANDIDATES = 50
-const ENRICH_BUDGET = 16 // Google Maps lookups per session
-const MAX_PARTNERS = 40
+const MAX_ZIPS = 2
+const MAX_SEARCHES = 6
+const RESULTS_PER_SEARCH = 5
+const MAX_CANDIDATES = 22
+const ENRICH_BUDGET = 12
+const MAX_PARTNERS = 30
 
-// Directory / aggregator hosts that are not the contractor's own business site.
 const DIRECTORY_HOSTS = [
   'yelp.', 'angi.', 'angieslist.', 'thumbtack.', 'houzz.', 'bbb.org',
   'facebook.', 'yellowpages.', 'mapquest.', 'indeed.', 'linkedin.',
   'buildzoom.', 'porch.', 'homeadvisor.', 'manta.', 'nextdoor.',
   'wikipedia.', 'youtube.', 'reddit.', 'pinterest.', 'instagram.',
   'tripadvisor.', 'glassdoor.', 'zillow.', 'realtor.', 'redfin.',
+  'google.', 'bing.', 'duckduckgo.', 'yahoo.', 'amazon.', 'apple.',
+  'craigslist.', 'whitepages.', 'expertise.', 'datanyze.', 'crunchbase.',
 ]
 
 function hashString(s: string): number {
@@ -91,10 +107,10 @@ function hostOf(url: string): string {
 
 function isDirectory(url: string): boolean {
   const host = hostOf(url).toLowerCase()
+  if (!host) return true
   return DIRECTORY_HOSTS.some((d) => host.includes(d))
 }
 
-// Small, reliable logo for the "logo spot": the site's 64px favicon.
 function faviconFor(url: string): string {
   const host = hostOf(url)
   return host ? `https://www.google.com/s2/favicons?domain=${host}&sz=64` : ''
@@ -104,7 +120,51 @@ function errMsg(err: unknown): string {
   return err instanceof Error ? err.message : String(err)
 }
 
-// --- In-page extractor: DuckDuckGo HTML results (very headless-friendly) ------
+// --- In-page extractors (run via page.evaluate, browser context) -------------
+
+// Google organic results. Handles the modern DOM (div.g / div.MjjYud anchors).
+function googleResultsExtract(): Array<{ title: string; url: string; snippet: string }> {
+  const out: Array<{ title: string; url: string; snippet: string }> = []
+  const seen = new Set<string>()
+  const anchors = Array.from(
+    document.querySelectorAll('a[href^="http"][data-ved], div.yuRUbf > a, div.g a[href^="http"]'),
+  ) as HTMLAnchorElement[]
+  for (const a of anchors) {
+    const href = a.href
+    if (!href || href.includes('google.com')) continue
+    const h3 = a.querySelector('h3')
+    const title = (h3 && h3.textContent ? h3.textContent : '').trim()
+    if (!title) continue
+    if (seen.has(href)) continue
+    seen.add(href)
+    const container = a.closest('div.g, div.MjjYud, div.tF2Cxc') || a.parentElement
+    const snipEl = container ? container.querySelector('div.VwiC3b, div[data-sncf], .lEBKkf') : null
+    const snippet = (snipEl && snipEl.textContent ? snipEl.textContent : '').trim().slice(0, 260)
+    out.push({ title, url: href, snippet })
+  }
+  return out
+}
+
+// Bing organic results.
+function bingResultsExtract(): Array<{ title: string; url: string; snippet: string }> {
+  const out: Array<{ title: string; url: string; snippet: string }> = []
+  const seen = new Set<string>()
+  const items = Array.from(document.querySelectorAll('li.b_algo'))
+  for (const li of items) {
+    const a = li.querySelector('h2 a') as HTMLAnchorElement | null
+    if (!a) continue
+    const href = a.href
+    const title = (a.textContent || '').trim()
+    if (!title || !href.startsWith('http') || seen.has(href)) continue
+    seen.add(href)
+    const p = li.querySelector('.b_caption p, p')
+    const snippet = (p && p.textContent ? p.textContent : '').trim().slice(0, 260)
+    out.push({ title, url: href, snippet })
+  }
+  return out
+}
+
+// DuckDuckGo HTML results.
 function ddgResultsExtract(): Array<{ title: string; url: string; snippet: string }> {
   const out: Array<{ title: string; url: string; snippet: string }> = []
   const seen = new Set<string>()
@@ -124,123 +184,128 @@ function ddgResultsExtract(): Array<{ title: string; url: string; snippet: strin
     }
     if (href.startsWith('//')) href = 'https:' + href
     const snipEl = b.querySelector('.result__snippet')
-    const snip = (snipEl && snipEl.textContent ? snipEl.textContent : '').trim()
-    if (!title || !href.startsWith('http')) continue
-    if (seen.has(href)) continue
+    const snippet = (snipEl && snipEl.textContent ? snipEl.textContent : '').trim().slice(0, 260)
+    if (!title || !href.startsWith('http') || seen.has(href)) continue
     seen.add(href)
-    out.push({ title, url: href, snippet: snip.slice(0, 260) })
+    out.push({ title, url: href, snippet })
   }
   return out
 }
 
-// --- In-page extractor: Google Maps results feed (rating + reviews + address) -
-function mapsFeedExtract(): Array<{
+// Scrape a contractor's OWN website for contact data + clean name + logo.
+function siteContactExtract(): {
   name: string
-  rating: number
-  reviewCount: number
-  address: string
-  mapsUrl: string
-}> {
-  const feed = document.querySelector('div[role="feed"]') || document.body
-  const cards = Array.from(feed.querySelectorAll('div.Nv2PK, a[href*="/maps/place/"]'))
-  const out: Array<{
-    name: string
-    rating: number
-    reviewCount: number
-    address: string
-    mapsUrl: string
-  }> = []
-  for (const card of cards) {
-    const link = (
-      card.matches('a[href*="/maps/place/"]')
-        ? card
-        : card.querySelector('a[href*="/maps/place/"]')
-    ) as HTMLAnchorElement | null
-    const nameEl = card.querySelector('.qBF1Pd, .fontHeadlineSmall')
-    const name =
-      (nameEl && nameEl.textContent ? nameEl.textContent.trim() : '') ||
-      (link && link.getAttribute('aria-label')
-        ? (link.getAttribute('aria-label') as string).trim()
-        : '')
-    if (!name) continue
-    const ratingEl = card.querySelector('span.MW4etd')
-    const rcEl = card.querySelector('span.UY7F9')
-    let rating = 0
-    let reviewCount = 0
-    if (ratingEl && ratingEl.textContent) {
-      const rm = ratingEl.textContent.match(/(\d+(?:\.\d+)?)/)
-      if (rm && rm[1]) rating = parseFloat(rm[1])
-    }
-    if (rcEl && rcEl.textContent) {
-      const cm = rcEl.textContent.replace(/[(),]/g, ' ').match(/(\d[\d,]*)/)
-      if (cm && cm[1]) reviewCount = parseInt(cm[1].replace(/,/g, ''), 10) || 0
-    }
-    const metaEls = Array.from(card.querySelectorAll('.W4Efsd'))
-    const metaTxt = metaEls.map((mm) => mm.textContent || '').join(' · ')
-    const addrMatch = metaTxt.match(/[\d][^·]*(?:St|Ave|Blvd|Rd|Dr|Hwy|Ln|Way|Pkwy|Ct)[^·]*/i)
-    const address = addrMatch ? addrMatch[0].trim() : ''
-    out.push({ name, rating, reviewCount, address, mapsUrl: link ? link.href : '' })
+  phone: string
+  email: string
+  logo: string
+} {
+  const pick = (sel: string, attr?: string): string => {
+    const el = document.querySelector(sel)
+    if (!el) return ''
+    const v = attr ? el.getAttribute(attr) : el.textContent
+    return (v || '').trim()
   }
-  return out
+  const name =
+    pick('meta[property="og:site_name"]', 'content') ||
+    pick('meta[property="og:title"]', 'content') ||
+    ((document.title || '').split(/[|\-–—]/)[0] || '').trim()
+  const telEl = document.querySelector('a[href^="tel:"]')
+  let phone = telEl ? (telEl.getAttribute('href') || '').replace(/^tel:/, '').trim() : ''
+  if (!phone) {
+    const m = (document.body.innerText || '').match(/\(?\d{3}\)?[\s.\-]\d{3}[\s.\-]\d{4}/)
+    if (m) phone = m[0].trim()
+  }
+  const mailEl = document.querySelector('a[href^="mailto:"]')
+  let email = mailEl ? ((mailEl.getAttribute('href') || '').replace(/^mailto:/, '').split('?')[0] || '').trim() : ''
+  if (!email) {
+    const em = (document.body.innerText || '').match(/[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}/)
+    if (em) email = em[0].trim()
+  }
+  const logo =
+    pick('link[rel~="icon"]', 'href') ||
+    pick('meta[property="og:image"]', 'content') ||
+    ''
+  return { name: name.slice(0, 60), phone, email, logo }
 }
 
-function mapsPlaceExtract(): { phone: string; topReview: string } {
-  const phoneBtn = document.querySelector('button[data-item-id^="phone"], a[href^="tel:"]')
-  const phone =
-    (phoneBtn && phoneBtn.getAttribute('aria-label')
-      ? (phoneBtn.getAttribute('aria-label') as string).replace(/^Phone:\s*/i, '').trim()
-      : '') ||
-    (phoneBtn && phoneBtn.getAttribute('href')
-      ? (phoneBtn.getAttribute('href') as string).replace(/^tel:/, '').trim()
-      : '')
-  const reviewEl = document.querySelector('.wiI7pd, .MyEned')
-  const topReview =
-    reviewEl && reviewEl.textContent ? reviewEl.textContent.trim().slice(0, 240) : ''
-  return { phone, topReview }
+// --- Step 1: multi-engine discovery ------------------------------------------
+interface Engine {
+  name: string
+  url: (q: string) => string
+  extractor: () => Array<{ title: string; url: string; snippet: string }>
+  settleMs: number
 }
 
-// --- Step 1: discover contractor sites via DDG across major ZIPs -------------
-async function discoverContractors(
-  page: any,
-  zips: string[],
-  state: string,
-): Promise<RawCandidate[]> {
+const ENGINES: Engine[] = [
+  {
+    name: 'google',
+    url: (q) => `https://www.google.com/search?q=${encodeURIComponent(q)}&num=20&hl=en&gl=us`,
+    extractor: googleResultsExtract,
+    settleMs: 1600,
+  },
+  {
+    name: 'bing',
+    url: (q) => `https://www.bing.com/search?q=${encodeURIComponent(q)}&count=20&setlang=en-us`,
+    extractor: bingResultsExtract,
+    settleMs: 1400,
+  },
+  {
+    name: 'ddg',
+    url: (q) => `https://html.duckduckgo.com/html/?q=${encodeURIComponent(q)}`,
+    extractor: ddgResultsExtract,
+    settleMs: 1200,
+  },
+]
+
+async function dismissGoogleConsent(page: any): Promise<void> {
+  // Set the consent-bypass cookie so Google serves results directly.
+  try {
+    const ctx = page.context()
+    await ctx.addCookies([
+      { name: 'CONSENT', value: 'YES+cb', domain: '.google.com', path: '/' },
+      { name: 'SOCS', value: 'CAI', domain: '.google.com', path: '/' },
+    ])
+  } catch {
+    /* best effort */
+  }
+}
+
+async function discoverContractors(page: any, zips: string[], state: string): Promise<RawCandidate[]> {
   const candidates: RawCandidate[] = []
   const seenHost = new Set<string>()
   let searches = 0
+  await dismissGoogleConsent(page)
   const zipSlice = zips.slice(0, MAX_ZIPS)
   outer: for (const zip of zipSlice) {
     for (const query of DISCOVERY_QUERIES) {
       if (searches >= MAX_SEARCHES || candidates.length >= MAX_CANDIDATES) break outer
       searches++
-      try {
-        const url = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(
-          `${query} ${zip} ${state}`,
-        )}`
-        await gotoAndSettle(page, url, 1200)
-        const results: Array<{ title: string; url: string; snippet: string }> =
-          await page.evaluate(ddgResultsExtract)
-        for (const r of results.slice(0, RESULTS_PER_SEARCH)) {
-          if (isDirectory(r.url)) continue
-          const host = hostOf(r.url)
-          if (!host || seenHost.has(host)) continue
-          seenHost.add(host)
-          candidates.push({ ...r, zip, queryCategory: query })
-          if (candidates.length >= MAX_CANDIDATES) break
+      const q = `${query} near ${zip} ${state}`
+      let results: Array<{ title: string; url: string; snippet: string }> = []
+      for (const eng of ENGINES) {
+        try {
+          await gotoAndSettle(page, eng.url(q), eng.settleMs)
+          results = await page.evaluate(eng.extractor)
+          if (results && results.length) break
+        } catch (err) {
+          console.warn(`[partners] ${eng.name} "${q}" failed:`, errMsg(err))
         }
-      } catch (err) {
-        console.warn(`[partners] discover "${query} ${zip}" failed:`, errMsg(err))
+      }
+      for (const r of (results || []).slice(0, RESULTS_PER_SEARCH)) {
+        if (isDirectory(r.url)) continue
+        const host = hostOf(r.url)
+        if (!host || seenHost.has(host)) continue
+        seenHost.add(host)
+        candidates.push({ ...r, zip, queryCategory: query })
+        if (candidates.length >= MAX_CANDIDATES) break
       }
     }
   }
   return candidates
 }
 
-// --- Step 2: ASI vets names + links, scores conviction, normalizes category --
-async function vetCandidatesWithAsi(
-  candidates: RawCandidate[],
-  loc: string,
-): Promise<VetResult[]> {
+// --- Step 2: ASI vetting ------------------------------------------------------
+async function vetCandidatesWithAsi(candidates: RawCandidate[], loc: string): Promise<VetResult[]> {
   if (!candidates.length) return []
   const heuristic = (): VetResult[] =>
     candidates.map((c, i) => ({
@@ -294,56 +359,31 @@ async function vetCandidatesWithAsi(
   }
 }
 
-// --- Step 3: enrich top vetted businesses with Google reviews + contact ------
-async function enrichFromGoogleMaps(
-  page: any,
-  partners: BusinessPartner[],
-  zipByName: Map<string, string>,
-): Promise<BusinessPartner[]> {
+// --- Step 3: enrich from the contractor's OWN website (+ Maps rating) --------
+async function enrichPartners(page: any, partners: BusinessPartner[]): Promise<void> {
   let budget = ENRICH_BUDGET
   for (const p of partners) {
     if (budget <= 0) break
-    try {
-      const zip = zipByName.get(p.id) || ''
-      const url = `https://www.google.com/maps/search/${encodeURIComponent(
-        `${p.name} ${zip}`,
-      )}/`
-      await gotoAndSettle(page, url, 2600)
-      const feed: Array<{
-        name: string
-        rating: number
-        reviewCount: number
-        address: string
-        mapsUrl: string
-      }> = await page.evaluate(mapsFeedExtract)
-      const first = Array.isArray(feed) && feed.length ? feed[0] : null
-      if (first) {
-        if (first.rating) p.rating = first.rating
-        if (first.reviewCount) p.reviewCount = first.reviewCount
-        if (first.address) p.address = first.address
-        if (first.mapsUrl) p.mapsUrl = first.mapsUrl
+    // Primary: scrape the contractor's own site — reliable, not bot-walled.
+    if (p.website) {
+      try {
+        await gotoAndSettle(page, p.website, 1400)
+        const info: { name: string; phone: string; email: string; logo: string } =
+          await page.evaluate(siteContactExtract)
+        if (info.phone) p.phone = info.phone
+        if (info.email) p.email = info.email
+        if (info.name && info.name.length > 2) p.name = info.name
+        budget--
+      } catch (err) {
+        console.warn(`[partners] site enrich "${p.name}" failed:`, errMsg(err))
       }
-      budget--
-      if (p.mapsUrl && budget > 0) {
-        try {
-          await gotoAndSettle(page, p.mapsUrl, 1800)
-          const detail: { phone: string; topReview: string } =
-            await page.evaluate(mapsPlaceExtract)
-          if (detail.phone) p.phone = detail.phone
-          if (detail.topReview) p.topReview = detail.topReview
-          budget--
-        } catch {
-          /* ignore detail failure */
-        }
-      }
-    } catch (err) {
-      console.warn(`[partners] enrich "${p.name}" failed:`, errMsg(err))
     }
+    // (Google Maps secondary lookup removed — too slow/bot-walled; site-direct
+    // scraping above already yields phone/email reliably.)
   }
-  return partners
 }
 
-// --- Step 4: final ranking ----------------------------------------------------
+// --- Step 4: ranking ----------------------------------------------------------
 function rankPartners(partners: BusinessPartner[]): BusinessPartner[] {
   return [...partners].sort((a, b) => {
     if (b.conviction !== a.conviction) return b.conviction - a.conviction
@@ -356,26 +396,26 @@ function rankPartners(partners: BusinessPartner[]): BusinessPartner[] {
   })
 }
 
-export async function scrapeLocalPartners(regionId: string): Promise<BusinessPartner[]> {
+export async function scrapeLocalPartners(regionId: string): Promise<PartnerScrapeResult> {
   const { state, city, zips } = regionContextFor(regionId)
   const loc = city ? `${city}, ${state}` : state
+  const fallback = (): PartnerScrapeResult => ({ partners: mockPartners(regionId), live: false })
 
-  if (!hasBrowserbaseKey()) return mockPartners(regionId)
+  if (!hasBrowserbaseKey()) return fallback()
 
   try {
     return await withBrowserbasePage(
-      async (page: any) => {
+      async (page: any): Promise<PartnerScrapeResult> => {
         const candidates = await discoverContractors(page, zips, state)
-        if (!candidates.length) return mockPartners(regionId)
+        console.log(`[partners] ${regionId}: discovered ${candidates.length} real candidates`)
+        if (!candidates.length) return fallback()
 
         const vetted = await vetCandidatesWithAsi(candidates, loc)
-        if (!vetted.length) return mockPartners(regionId)
+        if (!vetted.length) return fallback()
 
-        const zipByName = new Map<string, string>()
         let partners: BusinessPartner[] = vetted.slice(0, MAX_PARTNERS).map((v) => {
           const cand = candidates[v.i]!
           const id = `${regionId}-${hashString(cand.url)}`
-          zipByName.set(id, cand.zip)
           return {
             id,
             name: v.name,
@@ -392,19 +432,19 @@ export async function scrapeLocalPartners(regionId: string): Promise<BusinessPar
         })
 
         partners = rankPartners(partners)
-        await enrichFromGoogleMaps(page, partners, zipByName)
+        await enrichPartners(page, partners)
         const ranked = rankPartners(partners)
-        return ranked.length ? ranked : mockPartners(regionId)
+        return ranked.length ? { partners: ranked, live: true } : fallback()
       },
       { state },
     )
   } catch (err) {
     console.warn('[partners] live scrape failed, using mock:', errMsg(err))
-    return mockPartners(regionId)
+    return fallback()
   }
 }
 
-// --- Deterministic mock fallback (stable per region) -------------------------
+// --- Deterministic mock fallback ---------------------------------------------
 const MOCK_NAMES: Record<string, string[]> = {
   'general contractor': ['Summit Build Co.', 'Cornerstone Builders', 'Ironwood Construction'],
   excavation: ['Bedrock Excavation', 'Terra Grading Co.', 'DeepCut Earthworks'],

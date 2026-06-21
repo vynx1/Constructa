@@ -1,7 +1,7 @@
 ﻿import { Hono } from 'hono'
 import { getRedis, keys } from '~/lib/redis'
 import { complete } from '~/lib/claude'
-import { scrapeLocalPartners, mockPartners } from '~/lib/partnerScraper'
+import { scrapeLocalPartners, mockPartners , type BusinessPartner } from '~/lib/partnerScraper'
 import {
   STATE_SCORES,
   getDistrict,
@@ -359,29 +359,48 @@ map.get('/region/:regionId/partners', async (c) => {
   const cursor = Math.max(0, parseInt(c.req.query('cursor') ?? '0', 10) || 0)
   const pageSize = 8
   const liveMode = c.req.header('x-live-mode') === 'true'
+  // Allow callers to force a fresh scrape, bypassing any cached result.
+  const refresh =
+    c.req.query('refresh') === 'true' || c.req.header('x-refresh') === 'true'
   const redis = getRedis()
 
-  const paginate = (all: typeof mock, live: boolean) => {
-    const page = all.slice(cursor, cursor + pageSize)
+  const paginate = (all: BusinessPartner[], live: boolean) => {
+    const slice = all.slice(cursor, cursor + pageSize)
     const nextCursor = cursor + pageSize < all.length ? cursor + pageSize : null
-    return c.json({ regionId, partners: page, nextCursor, total: all.length, live })
+    return c.json({ partners: slice, nextCursor, total: all.length, live })
+  }
+
+  const cacheKey = keys.regionPartners(regionId)
+
+  // Serve cache only when not explicitly refreshing.
+  if (!refresh && redis) {
+    try {
+      const cached = await redis.get(cacheKey)
+      if (cached) {
+        const partners = JSON.parse(cached) as BusinessPartner[]
+        if (Array.isArray(partners) && partners.length) return paginate(partners, true)
+      }
+    } catch (err) {
+      console.warn('[partners] cache read failed:', err)
+    }
   }
 
   const mock = mockPartners(regionId)
-
-  // Cache hit â€” serve pages without re-scraping.
-  if (redis) {
-    const cached = await redis.get(keys.regionPartners(regionId))
-    if (cached) return paginate(JSON.parse(cached), true)
-  }
-
   if (!liveMode) return paginate(mock, false)
 
   try {
-    const partners = await scrapeLocalPartners(regionId)
-    if (redis)
-      await redis.set(keys.regionPartners(regionId), JSON.stringify(partners), 'EX', 7200)
-    return paginate(partners, true)
+    const { partners, live } = await scrapeLocalPartners(regionId)
+    // CRITICAL: only cache real live data — never cache the mock fallback,
+    // otherwise stale fake contractors get served forever.
+    if (live && partners.length) {
+      try {
+        if (redis) await redis.set(cacheKey, JSON.stringify(partners), 'EX', 7200)
+      } catch (err) {
+        console.warn('[partners] cache write failed:', err)
+      }
+      return paginate(partners, true)
+    }
+    return paginate(partners.length ? partners : mock, false)
   } catch (err) {
     console.error('[partners] live failed, serving mock:', err)
     return paginate(mock, false)
