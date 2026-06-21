@@ -3332,6 +3332,62 @@ body:has(.workflow) { background: var(--bg-dark); }
   background: var(--bg-dark);
   border-left: 1px solid var(--line-dark);
 }
+.workspace__forms-section {
+  padding: 0.85rem 1rem 1rem;
+  border-top: 1px solid var(--line-dark);
+}
+.workspace-forms__run {
+  width: 100%;
+  justify-content: center;
+  font-size: 0.82rem;
+  font-weight: 600;
+  padding: 0.55rem 0.85rem;
+  border-radius: 10px;
+}
+.workspace-forms__error {
+  margin: 0.5rem 0 0;
+  font-size: 0.72rem;
+  color: var(--accent-warm);
+}
+.workspace-forms__list {
+  list-style: none;
+  margin: 0.65rem 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+.workspace-forms__item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.45rem 0.55rem;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.04);
+}
+.workspace-forms__label {
+  font-size: 0.78rem;
+  font-weight: 500;
+  color: var(--ink-dark);
+}
+.workspace-forms__download {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: none;
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--glow-cyan);
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+.workspace-forms__download:hover {
+  background: rgba(34, 211, 238, 0.15);
+  color: #fff;
+}
 
 /* #3 — the 3D model sits slightly smaller inside a rounded rectangle. */
 .model-viewer {

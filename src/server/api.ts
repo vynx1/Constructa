@@ -27,6 +27,7 @@ import { generateLandBuyingGuide, seededGuide, asiComplete } from '~/lib/asi'
 import { compliancePdfDataUrl } from '~/lib/pdfCompliance'
 import { generateModel, getModel } from '~/lib/modelGen'
 import { generateExecutionPlan, getExecutionPlan } from '~/lib/executionPlan'
+import { fillPermitForms, type ProjectFormData } from '~/lib/pdfFormFiller'
 import {
   readProjectData,
   patchProjectData,
@@ -1026,6 +1027,19 @@ agents.get('/watchdog/:projectId/:step', async (c) => {
     // agent-service offline — fall through to mock
   }
   return c.json({ projectId, step: Number(step), conditions: [], alerts: [] })
+})
+
+// Permit / RFI form filler: project dict -> two filled AcroForm PDFs (base64).
+agents.post('/forms', async (c) => {
+  const body = (await c.req.json().catch(() => ({}))) as { project?: ProjectFormData }
+  const project = body.project ?? body
+  try {
+    const forms = await fillPermitForms(project as ProjectFormData)
+    return c.json({ forms })
+  } catch (err) {
+    console.error('[forms] PDF fill failed:', err)
+    return c.json({ forms: {}, error: 'PDF generation failed' }, 500)
+  }
 })
 
 api.route('/agents', agents)

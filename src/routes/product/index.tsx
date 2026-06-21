@@ -10,6 +10,7 @@ import { CompletedWork } from '~/components/product/CompletedWork'
 import { ComplianceCards } from '~/components/product/ComplianceCards'
 import { HorizontalTimeline } from '~/components/product/HorizontalTimeline'
 import { StageWorkflowDemo } from '~/components/product/StageWorkflowDemo'
+import { PermitFormsPanel } from '~/components/product/PermitFormsPanel'
 import { scaffoldRegistry, type SceneGraph } from '~/lib/modelScaffold'
 import { STAGE_TO_MESH, type ExecutionPlan, type PlanStage, type AgentKey } from '~/lib/planTypes'
 import { projectClient, type CachedDeepDive } from '~/lib/projectClient'
@@ -295,6 +296,9 @@ function ProductPage() {
             onSolve={onSolve}
             onAutoSolve={onAutoSolve}
           />
+          <section className="workspace__forms-section">
+            <PermitFormsPanel />
+          </section>
         </aside>
       </div>
 
