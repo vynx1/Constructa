@@ -1,4 +1,6 @@
-﻿import { Hono } from 'hono'
+﻿import { readFileSync, existsSync } from 'node:fs'
+import { join } from 'node:path'
+import { Hono } from 'hono'
 import { getRedis, keys } from '~/lib/redis'
 import { complete } from '~/lib/claude'
 import { scrapeLocalPartners, mockPartners , type BusinessPartner } from '~/lib/partnerScraper'
@@ -50,6 +52,25 @@ import {
 
 const AGENT_SERVICE_URL = () =>
   process.env.AGENT_SERVICE_URL ?? 'http://localhost:8000'
+
+
+// Seed-file fallback: lazily loaded once so a Redis miss still serves real
+// contractor data from data/partners.seed.json.
+let _seedCache: Record<string, BusinessPartner[]> | null = null
+function getSeedPartners(regionId: string): BusinessPartner[] | null {
+  if (!_seedCache) {
+    const p = join(process.cwd(), 'data', 'partners.seed.json')
+    if (!existsSync(p)) return null
+    try {
+      _seedCache = JSON.parse(readFileSync(p, 'utf8')) as Record<string, BusinessPartner[]>
+    } catch {
+      return null
+    }
+  }
+  const key = `map:region:${regionId}:partners`
+  const partners = _seedCache[key]
+  return Array.isArray(partners) && partners.length > 0 ? partners : null
+}
 
 export const api = new Hono().basePath('/api')
 
@@ -431,6 +452,18 @@ map.get('/region/:regionId/partners', async (c) => {
       }
     } catch (err) {
       console.warn('[partners] cache read failed:', err)
+    }
+  }
+
+  // Seed-file fallback when Redis is empty or unavailable.
+  if (!all) {
+    const seeded = getSeedPartners(regionId)
+    if (seeded) {
+      all = seeded
+      live = true
+      if (redis) {
+        redis.set(cacheKey, JSON.stringify(seeded), 'EX', 86400).catch(() => {})
+      }
     }
   }
 
