@@ -1226,9 +1226,9 @@ body:has(.map-page-v2) {
   position: relative;
   padding: 1.35rem 1.25rem;
   border-radius: 12px;
-  background: linear-gradient(165deg, var(--bg-dark-elevated), #0b0f14);
-  border: 1px solid var(--line-dark);
-  box-shadow: 0 4px 20px -12px rgba(0, 0, 0, 0.5);
+  background: linear-gradient(165deg, rgba(255, 255, 255, 0.95), rgba(248, 250, 252, 0.9));
+  border: 1px solid color-mix(in srgb, var(--line) 80%, transparent);
+  box-shadow: 0 4px 20px -12px rgba(17, 24, 32, 0.15);
   transition:
     transform 0.3s ease,
     box-shadow 0.3s ease,
@@ -1239,8 +1239,8 @@ body:has(.map-page-v2) {
   transform: translateY(-3px);
   border-color: rgba(34, 211, 238, 0.28);
   box-shadow:
-    0 16px 36px -16px rgba(0, 0, 0, 0.55),
-    0 0 24px -8px rgba(34, 211, 238, 0.2);
+    0 16px 36px -16px rgba(17, 24, 32, 0.22),
+    0 0 24px -8px rgba(34, 211, 238, 0.15);
 }
 .telemetry-card__ring {
   position: absolute;
@@ -1281,13 +1281,13 @@ body:has(.map-page-v2) {
   font-size: 1.02rem;
   font-weight: 600;
   letter-spacing: -0.01em;
-  color: var(--ink-dark);
+  color: var(--ink);
 }
 .telemetry-card__body {
   margin: 0;
   font-size: 0.88rem;
   line-height: 1.55;
-  color: var(--ink-soft-dark);
+  color: var(--ink-soft);
 }
 
 /* --- HUD frame (demo + overlays) ----------------------------------------- */
@@ -3328,21 +3328,11 @@ body:has(.workflow) { background: var(--bg-dark); }
 
 /* --- Agent dock (the 6 quick-buttons + panel) ----------------------------- */
 .agent-dock { border-top: 1px solid var(--line-dark); background: rgba(11, 15, 20, 0.85); }
-.agent-dock__heading {
-  margin: 0;
-  padding: 0.7rem 0.9rem 0.15rem;
-  font-size: 0.72rem;
-  font-weight: 700;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: #e8b04b;
-}
 .agent-dock__bar {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.5rem;
-  row-gap: 0.6rem;
-  padding: 0.7rem 0.9rem 1.3rem;
+  gap: 0.45rem;
+  padding: 0.7rem 0.9rem;
 }
 .agent-chip {
   display: inline-flex;
@@ -3360,14 +3350,7 @@ body:has(.workflow) { background: var(--bg-dark); }
 }
 .agent-chip:hover:not(:disabled) { border-color: var(--teal-bright); transform: translateY(-1px); }
 .agent-chip.is-open { border-color: var(--teal-bright); background: rgba(24, 160, 168, 0.14); color: #fff; }
-.agent-chip--model {
-  border-color: rgba(34, 211, 238, 0.5);
-  color: #ffffff;
-  justify-content: center;
-  text-align: center;
-  padding: 0.5rem 0.85rem;
-  line-height: 1.1;
-}
+.agent-chip--model { border-color: rgba(34, 211, 238, 0.4); }
 .agent-chip--cad, .agent-chip:disabled { opacity: 0.4; cursor: not-allowed; }
 
 .agent-panel {
@@ -3757,46 +3740,3 @@ body:has(.workflow) { background: var(--bg-dark); }
 .completed-work__open { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.4rem; }
 .completed-work__open li { display: flex; align-items: center; gap: 0.5rem; font-size: 0.8rem; color: var(--ink-dark); }
 .completed-work__open-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent-warm); flex-shrink: 0; }
-
-/* --- Compliance documents (Completed work) -------------------------------- */
-.completed-work__docs {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 0.6rem;
-}
-.doc-entry {
-  padding: 0.7rem 0.8rem;
-  border: 1px solid var(--line-dark);
-  border-left: 3px solid #e8b04b;
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.03);
-}
-.doc-entry__link {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.4rem;
-  color: #e8b04b;
-  font-weight: 600;
-  font-size: 0.86rem;
-  text-decoration: none;
-}
-.doc-entry__link:hover { text-decoration: underline; }
-.doc-entry__name { word-break: break-all; }
-.doc-entry__meta {
-  display: flex;
-  gap: 0.6rem;
-  margin-top: 0.35rem;
-  font-size: 0.74rem;
-  color: var(--ink-soft-dark);
-}
-.doc-entry__stage { font-weight: 600; }
-.doc-entry__log {
-  margin: 0.45rem 0 0;
-  font-size: 0.76rem;
-  color: var(--ink-soft-dark);
-  border-top: 1px dashed var(--line-dark);
-  padding-top: 0.4rem;
-}
