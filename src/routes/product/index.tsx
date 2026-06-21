@@ -171,8 +171,22 @@ function ProductPage() {
             .catch(() => {})
         }
       }
+            // #5 — turn the agent's solution into a downloadable compliance PDF
+      // (filed under "Completed work") instead of surfacing raw markdown.
+      let statusMsg = 'Compliance document generated — see Completed work.'
+      try {
+        const meta = await projectClient.generateCompliancePdf({
+          projectId: pid,
+          stage: stage.title,
+          content: answer,
+        })
+        statusMsg = `Compliance document "${meta.filename}" filed under Completed work.`
+      } catch {
+        statusMsg = 'Stage resolved, but the compliance document could not be generated.'
+      }
       bumpRecord()
-      return answer
+      setRecordOpen(true)
+      return statusMsg
     },
     [projectId, bumpRecord],
   )
