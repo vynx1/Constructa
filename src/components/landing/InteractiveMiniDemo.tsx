@@ -364,7 +364,7 @@ export function InteractiveMiniDemo() {
           From parcel click to permitted assembly.
         </h2>
         <p className="m-0 max-w-2xl text-[1rem] leading-relaxed text-[var(--ink-soft)]">
-          Map a parcel, describe the project, and watch Construca generate the
+          Map a parcel, describe the project, and watch Constructa generate the
           build while compliance checkpoints attach in real time.
         </p>
 

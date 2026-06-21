@@ -20,5 +20,5 @@ app.all('*', (c) => handler.fetch(c.req.raw))
 
 const port = Number(process.env.PORT) || 3000
 serve({ fetch: app.fetch, port }, (info) => {
-  console.log(`Construca listening on http://localhost:${info.port}`)
+  console.log(`Constructa listening on http://localhost:${info.port}`)
 })

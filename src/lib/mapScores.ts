@@ -75,3 +75,23 @@ export function colorForScoreCss(score: number, population: number[], alpha = 1)
   const [r, g, b] = colorForScore(score, population)
   return `rgba(${r}, ${g}, ${b}, ${alpha})`
 }
+
+/**
+ * Map an absolute 0–100 construction-consensus score to a letter grade, so the
+ * national map reads each state as a grade instead of a raw number.
+ */
+export function scoreToGrade(score: number): string {
+  const s = Math.max(0, Math.min(100, Math.round(score)))
+  if (s >= 90) return 'A+'
+  if (s >= 85) return 'A'
+  if (s >= 80) return 'A-'
+  if (s >= 75) return 'B+'
+  if (s >= 70) return 'B'
+  if (s >= 65) return 'B-'
+  if (s >= 60) return 'C+'
+  if (s >= 55) return 'C'
+  if (s >= 50) return 'C-'
+  if (s >= 45) return 'D+'
+  if (s >= 40) return 'D'
+  return 'F'
+}

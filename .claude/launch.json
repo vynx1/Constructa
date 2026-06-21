@@ -1,6 +1,7 @@
 {
   "version": "0.0.1",
   "configurations": [
-    { "name": "construca", "runtimeExecutable": "npm", "runtimeArgs": ["run", "dev"], "port": 3000 }
+    { "name": "Constructa", "runtimeExecutable": "npm", "runtimeArgs": ["run", "dev"], "port": 3000 },
+    { "name": "Constructa-preview", "runtimeExecutable": "node_modules/.bin/vite", "runtimeArgs": ["dev", "--port", "3100"], "port": 3100, "autoPort": false }
   ]
 }

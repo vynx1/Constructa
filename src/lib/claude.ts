@@ -2,7 +2,7 @@ import Anthropic from '@anthropic-ai/sdk'
 import { asiComplete, hasAsiKey } from '~/lib/asi'
 
 // ---------------------------------------------------------------------------
-// LLM entrypoint. Construca now uses ASI:One as its universal LLM (per the
+// LLM entrypoint. Constructa now uses ASI:One as its universal LLM (per the
 // revised plan) — Anthropic is OPTIONAL. `complete()` resolution order:
 //   1. ASI:One  (ASI_ONE_API_KEY)            — the default path now.
 //   2. Anthropic (ANTHROPIC_API_KEY)         — only if ASI is unset but
@@ -29,7 +29,7 @@ export const CLAUDE_MODEL = process.env.CLAUDE_MODEL ?? 'claude-opus-4-8'
 
 /** Single-turn completion. Prefers ASI:One; falls back to Anthropic, then mock. */
 export async function complete(prompt: string, system?: string): Promise<string> {
-  // 1. ASI:One — the universal LLM for Construca.
+  // 1. ASI:One — the universal LLM for Constructa.
   if (hasAsiKey()) {
     return asiComplete(prompt, system)
   }

@@ -1,4 +1,4 @@
-"""Construca agent service (FastAPI).
+"""Constructa agent service (FastAPI).
 
 Hosts the two Python-side jobs from BUILD_PLAN §6:
   - the single Fetch.ai uAgent (Compliance Watchdog)
@@ -17,7 +17,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from watchdog.agent import active_conditions
 from voice.pipeline import transcribe_and_structure
 
-app = FastAPI(title="Construca Agent Service", version="0.1.0")
+app = FastAPI(title="Constructa Agent Service", version="0.1.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -29,7 +29,7 @@ app.add_middleware(
 
 @app.get("/health")
 def health() -> dict:
-    return {"ok": True, "service": "Construca-agent-service"}
+    return {"ok": True, "service": "Constructa-agent-service"}
 
 
 @app.get("/watchdog/{project_id}/{step}")

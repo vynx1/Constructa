@@ -1,4 +1,4 @@
-# Construca — Interactive Map & Deep-Dive Workspace
+# Constructa — Interactive Map & Deep-Dive Workspace
 
 This document covers the **map system**: the interactive choropleth, the
 automated deep-dive scraping pipeline, the ASI:One multi-agent routing engine,
@@ -206,7 +206,7 @@ the routing story is still visible during a demo.
 
 ### 4.5 LLM  → ASI:One (Anthropic now optional)
 
-Construca's universal LLM is **ASI:One**. `src/lib/claude.ts` `complete()` —
+Constructa's universal LLM is **ASI:One**. `src/lib/claude.ts` `complete()` —
 used by `/api/project/:id/redesign`, `/api/agents/rfi`, and district
 justifications — resolves in this order:
 

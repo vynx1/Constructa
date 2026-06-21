@@ -60,6 +60,8 @@ export interface LandListing {
   images: string[]
   imageUnavailable?: boolean
   sources: { title: string; url: string }[]
+  confidence?: number
+  agent?: { name: string; handle: string; address: string }
 }
 
 export interface GuideFactor {
@@ -68,6 +70,9 @@ export interface GuideFactor {
   score: number
   reasoning: string
   sources: { title: string; url: string }[]
+  // Multistack provenance: which Agentverse specialist produced this factor.
+  confidence?: number
+  agent?: { name: string; handle: string; address: string }
 }
 
 export interface BuyRecommendation {
@@ -93,6 +98,32 @@ export interface RegionDeepDive {
   region: CongressRegion
   guide: BuyingGuide
   listings: LandListing[]
+  live: boolean
+}
+
+export interface BusinessPartner {
+  id: string
+  name: string
+  category: string
+  rating: number
+  reviewCount: number
+  conviction?: number
+  logoWidth?: number
+  topReview?: string
+  phone?: string
+  website?: string
+  address?: string
+  logo?: string
+  mapsUrl?: string
+  sourceSite: string
+  scrapedAt: string
+}
+
+export interface PartnersPage {
+  regionId: string
+  partners: BusinessPartner[]
+  nextCursor: number | null
+  total: number
   live: boolean
 }
 
@@ -143,6 +174,20 @@ export const mapClient = {
     return res.json()
   },
 
+  // Local Partners: BrowserBase contractor/business list, cursor-paginated.
+  partners: async (
+    regionId: string,
+    cursor = 0,
+    opts: { live?: boolean } = {},
+  ): Promise<PartnersPage> => {
+    const res = await fetch(
+      `/api/map/region/${regionId}/partners?cursor=${cursor}`,
+      { headers: { 'x-live-mode': opts.live ? 'true' : 'false' } },
+    )
+    if (!res.ok) throw new Error(`region partners ${res.status}`)
+    return res.json()
+  },
+
   liked: () =>
     getJson<{ liked: LandListing[]; source: string }>('/api/map/liked'),
 
@@ -156,4 +201,3 @@ export const mapClient = {
   unlike: (id: string) =>
     fetch(`/api/map/liked/${id}`, { method: 'DELETE' }).then((r) => r.json()),
 }
-

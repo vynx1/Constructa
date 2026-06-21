@@ -19,3 +19,20 @@ export function resolveRegion(regionId: string): CongressRegion | null {
   if (!code) return null
   return generateStateRegions(code).find((r) => r.id === regionId) ?? null
 }
+
+
+// Sibling congressional districts in the SAME state, nearest first (by center
+// distance), excluding the region itself. Used to borrow live listing imagery
+// when a district has no specific properties of its own.
+export function nearbyRegionIds(regionId: string, limit = 4): string[] {
+  const self = resolveRegion(regionId)
+  const code = stateCodeFromRegionId(regionId)
+  if (!self || !code) return []
+  const [lng, lat] = self.center
+  return generateStateRegions(code)
+    .filter((r) => r.id !== self.id)
+    .map((r) => ({ id: r.id, d: (r.center[0] - lng) ** 2 + (r.center[1] - lat) ** 2 }))
+    .sort((a, b) => a.d - b.d)
+    .slice(0, limit)
+    .map((r) => r.id)
+}
