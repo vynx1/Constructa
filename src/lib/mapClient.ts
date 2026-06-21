@@ -13,6 +13,22 @@ export {
   COLOR_STOPS,
 } from '~/lib/mapScores'
 
+
+// --- Agentverse direct dispatch (browser → agent-service, no middleman) ------
+// Fire-and-forget: sends a real Chat-Protocol message to all 6 hosted Fetch.ai
+// agents so their Agentverse interaction counters increment on every research.
+function dispatchAgents(prompt: string): void {
+  const url = 'http://localhost:8000/agents/dispatch'
+  fetch(url, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ prompt }),
+  })
+    .then((r) => r.json())
+    .then((j: any) => console.log('[agentverse] dispatched', j?.delivered, '/', j?.total, 'agents'))
+    .catch((e) => console.warn('[agentverse] dispatch failed:', e.message))
+}
+
 export interface StateScore {
   code: string
   name: string
@@ -175,6 +191,8 @@ export const mapClient = {
     regionId: string,
     opts: { live?: boolean } = {},
   ): Promise<RegionDeepDive> => {
+    // Dispatch to Agentverse agents on EVERY deep-dive (fire-and-forget).
+    dispatchAgents(`Constructa district research: evaluate ${regionId} for development suitability in California.`)
     const res = await fetch(`/api/map/region/${regionId}/deep-dive`, {
       method: 'POST',
       headers: {

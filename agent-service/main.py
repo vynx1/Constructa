@@ -27,7 +27,7 @@ app = FastAPI(title="Constructa Agent Service", version="0.1.0")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[os.environ.get("WEB_ORIGIN", "*")],
+    allow_origins=["*"],
     allow_methods=["*"],
     allow_headers=["*"],
 )
