@@ -10,7 +10,7 @@
 | Auth         | Clerk                                               |
 | Web API      | Hono (mounted inside TanStack Start at `/api/*`)    |
 | State/cache  | Redis                                               |
-| LLM          | Anthropic Claude                                    |
+| LLM          | Fetch.AI                               |
 | Agent svc    | Python FastAPI (Deepgram + Fetch.ai watchdog)       |
 
 
